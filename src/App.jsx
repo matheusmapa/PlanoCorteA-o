@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Trash2, Plus, Download, Clipboard, Save, RefreshCw, FileText, Settings, Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, FolderUp, X, Eraser, LogOut, User, Menu, FolderHeart, Calendar } from 'lucide-react';
+import { Trash2, Plus, Download, Clipboard, Save, RefreshCw, FileText, Settings, Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, FolderUp, X, Eraser, LogOut, User, Menu, FolderHeart, Calendar, Edit3, Check } from 'lucide-react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, serverTimestamp } from 'firebase/firestore';
 
 // Lógica externa
 import { extractTextFromPDF, parseTextToItems, BITOLAS_COMERCIAIS, generateId } from './pdfProcessor';
 import { calculateCutPlan } from './cutOptimizer';
-import { auth, db } from './firebase'; // Importa auth e db
+import { auth, db } from './firebase'; 
 import Login from './Login';
 
 // --- COMPONENTE PRINCIPAL ---
@@ -17,11 +17,15 @@ const OtimizadorCorteAco = ({ user }) => {
   const [inventory, setInventory] = useState([]); // ESTOQUE
   const [results, setResults] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  
+  // Alterado: uploadedFiles agora pode conter arquivos REAIS ou PROJETOS CARREGADOS
+  // Estrutura: { id, name, type: 'file' | 'project', status: 'ok' | 'erro' | 'lendo' }
   const [uploadedFiles, setUploadedFiles] = useState([]);
 
   // --- Estados do Banco de Dados / Projetos ---
   const [projects, setProjects] = useState([]);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  const [editingProject, setEditingProject] = useState(null); // Projeto sendo editado no modal
   
   // --- Estados de Interface ---
   const [activeInventoryBitola, setActiveInventoryBitola] = useState('todas');
@@ -33,7 +37,6 @@ const OtimizadorCorteAco = ({ user }) => {
   const [enabledBitolas, setEnabledBitolas] = useState([...BITOLAS_COMERCIAIS]);
 
   const fileInputRef = useRef(null);
-  const inventoryInputRef = useRef(null);
 
   const BARRA_PADRAO = 1200;
   const PERDA_CORTE = 0;
@@ -121,37 +124,69 @@ const OtimizadorCorteAco = ({ user }) => {
       }
   };
 
-  const handleLoadProject = (project) => {
-      if (!project.items || project.items.length === 0) return;
-
-      if(window.confirm(`Deseja ADICIONAR os itens do projeto "${project.name}" à sua lista atual?\n(Isso não apaga o que você já tem na tela)`)) {
-          // AQUI ESTÁ O PULO DO GATO:
-          // Mapeamos os itens recarregados gerando NOVOS IDs para evitar conflito de chave no React
-          // E somamos à lista existente.
-          const newItems = project.items.map(item => ({
-              ...item,
-              id: generateId(),
-              origin: `Importado: ${project.name}` // Marca a origem para saber de onde veio
-          }));
-
-          setItems(prev => [...prev, ...newItems]);
-          setIsSidebarOpen(false); // Fecha sidebar após carregar
-          alert(`${newItems.length} itens adicionados à lista!`);
+  // Atualizar nome do projeto no Firestore
+  const handleUpdateProjectName = async (projectId, newName) => {
+      if (!newName.trim()) return;
+      try {
+          await updateDoc(doc(db, 'users', user.uid, 'projects', projectId), {
+              name: newName
+          });
+          setEditingProject(prev => ({...prev, name: newName}));
+      } catch (error) {
+          console.error("Erro ao atualizar:", error);
+          alert("Erro ao renomear projeto.");
       }
   };
 
-  const handleDeleteProject = async (projectId, e) => {
-      e.stopPropagation(); // Evita disparar o click do card
-      if(window.confirm("Tem certeza que deseja excluir este projeto salvo?")) {
+  // Carregar projeto como um "Módulo/Arquivo"
+  const loadProjectAsModule = (project) => {
+      // Verifica se já está carregado
+      if (uploadedFiles.some(f => f.id === project.id)) {
+          alert("Este projeto já foi adicionado à lista.");
+          return;
+      }
+
+      const projectOriginName = `[PROJETO] ${project.name}`;
+
+      // Cria itens com novos IDs e origem marcada
+      const newItems = project.items.map(item => ({
+          ...item,
+          id: generateId(),
+          origin: projectOriginName
+      }));
+
+      // Adiciona aos itens
+      setItems(prev => [...prev, ...newItems]);
+
+      // Adiciona à lista de "arquivos" (Chips)
+      setUploadedFiles(prev => [
+          ...prev, 
+          { 
+              id: project.id, 
+              name: project.name, 
+              originName: projectOriginName, // Usado para remoção
+              type: 'project', 
+              status: 'ok',
+              count: newItems.length
+          }
+      ]);
+
+      setEditingProject(null); // Fecha modal
+      setIsSidebarOpen(false); // Fecha sidebar
+  };
+
+  const handleDeleteProject = async (projectId) => {
+      if(window.confirm("Tem certeza que deseja excluir este projeto PERMANENTEMENTE do banco de dados?")) {
           try {
               await deleteDoc(doc(db, 'users', user.uid, 'projects', projectId));
+              setEditingProject(null); // Fecha modal se estiver aberto
           } catch (error) {
               alert("Erro ao excluir.");
           }
       }
   };
 
-  // --- Funções do App (Mantidas) ---
+  // --- Funções do App ---
 
   const saveInventoryToLocal = (newInv) => {
     setInventory([...newInv]);
@@ -185,10 +220,11 @@ const OtimizadorCorteAco = ({ user }) => {
     let allExtractedItems = [];
 
     for (const file of files) {
-        if (newUploadedFiles.some(f => f.name === file.name)) {
+        if (newUploadedFiles.some(f => f.name === file.name && f.type === 'file')) {
+             // Já existe, remove itens antigos desse arquivo para reprocessar
              setItems(prev => prev.filter(i => i.origin !== file.name));
         } else {
-             newUploadedFiles.push({ name: file.name, size: file.size, status: 'lendo' });
+             newUploadedFiles.push({ id: generateId(), name: file.name, size: file.size, type: 'file', status: 'lendo' });
         }
         setUploadedFiles([...newUploadedFiles]);
 
@@ -203,12 +239,12 @@ const OtimizadorCorteAco = ({ user }) => {
             const itemsFromThisFile = parseTextToItems(text, file.name);
             allExtractedItems = [...allExtractedItems, ...itemsFromThisFile];
             
-            const fileIndex = newUploadedFiles.findIndex(f => f.name === file.name);
+            const fileIndex = newUploadedFiles.findIndex(f => f.name === file.name && f.type === 'file');
             if (fileIndex !== -1) newUploadedFiles[fileIndex].status = 'ok';
 
         } catch (error) {
             console.error("Erro:", error);
-            const fileIndex = newUploadedFiles.findIndex(f => f.name === file.name);
+            const fileIndex = newUploadedFiles.findIndex(f => f.name === file.name && f.type === 'file');
             if (fileIndex !== -1) newUploadedFiles[fileIndex].status = 'erro';
         }
     }
@@ -219,9 +255,13 @@ const OtimizadorCorteAco = ({ user }) => {
     if(fileInputRef.current) fileInputRef.current.value = '';
   };
 
-  const removeFile = (fileName) => {
-      setUploadedFiles(prev => prev.filter(f => f.name !== fileName));
-      setItems(prev => prev.filter(i => i.origin !== fileName));
+  const removeFileOrProject = (fileData) => {
+      // Remove da lista de chips
+      setUploadedFiles(prev => prev.filter(f => f.id !== fileData.id));
+      
+      // Remove os itens associados
+      const originToRemove = fileData.type === 'project' ? fileData.originName : fileData.name;
+      setItems(prev => prev.filter(i => i.origin !== originToRemove));
   };
 
   const openManualInputModal = () => {
@@ -406,20 +446,17 @@ const OtimizadorCorteAco = ({ user }) => {
                   projects.map(proj => (
                       <div 
                         key={proj.id} 
-                        onClick={() => handleLoadProject(proj)}
+                        // Ao clicar, abre o modal de edição ao invés de carregar direto
+                        onClick={() => setEditingProject(proj)}
                         className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:shadow-md hover:border-indigo-300 cursor-pointer transition-all group relative"
                       >
-                          <div className="font-bold text-slate-800 text-sm mb-1 pr-6">{proj.name}</div>
+                          <div className="font-bold text-slate-800 text-sm mb-1 pr-6 truncate">{proj.name}</div>
                           <div className="text-xs text-slate-500 flex items-center gap-1">
-                              <Calendar size={12}/> {proj.createdAt?.toDate().toLocaleDateString()} - {proj.items.length} itens
+                              <Calendar size={12}/> {proj.createdAt?.toDate().toLocaleDateString()} - {proj.items.length} peças
                           </div>
-                          <button 
-                            onClick={(e) => handleDeleteProject(proj.id, e)}
-                            className="absolute top-2 right-2 text-slate-300 hover:text-red-500 p-1 rounded-full hover:bg-red-50 transition-colors"
-                            title="Excluir projeto"
-                          >
-                              <XCircle size={16} />
-                          </button>
+                          <div className="absolute top-3 right-3 text-indigo-300 group-hover:text-indigo-600 transition-colors">
+                            <Edit3 size={14} />
+                          </div>
                       </div>
                   ))
               )}
@@ -428,6 +465,55 @@ const OtimizadorCorteAco = ({ user }) => {
 
       {/* OVERLAY DA SIDEBAR */}
       {isSidebarOpen && <div className="fixed inset-0 bg-black/20 z-[50] backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}></div>}
+
+      {/* --- MODAL DE EDIÇÃO DO PROJETO (NOVO) --- */}
+      {editingProject && (
+          <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center backdrop-blur-sm p-4">
+              <div className="bg-white rounded-lg shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                  <div className="bg-indigo-50 p-4 border-b border-indigo-100 flex justify-between items-center">
+                      <h3 className="font-bold text-indigo-900 flex items-center gap-2"><Edit3 size={18}/> Editar Projeto</h3>
+                      <button onClick={() => setEditingProject(null)} className="text-slate-400 hover:text-slate-700"><X size={20}/></button>
+                  </div>
+                  <div className="p-6 space-y-4">
+                      <div>
+                          <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nome do Projeto</label>
+                          <div className="flex gap-2">
+                              <input 
+                                type="text" 
+                                value={editingProject.name} 
+                                onChange={(e) => setEditingProject({...editingProject, name: e.target.value})}
+                                className="flex-1 p-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 outline-none"
+                              />
+                              <button 
+                                onClick={() => handleUpdateProjectName(editingProject.id, editingProject.name)}
+                                className="bg-indigo-100 text-indigo-700 p-2 rounded hover:bg-indigo-200" title="Salvar Nome"
+                              >
+                                  <Save size={18} />
+                              </button>
+                          </div>
+                      </div>
+                      <div className="bg-slate-50 p-3 rounded border border-slate-100 text-sm text-slate-600">
+                          <p><strong>Itens:</strong> {editingProject.items.length} peças</p>
+                          <p><strong>Data:</strong> {editingProject.createdAt?.toDate().toLocaleDateString()}</p>
+                      </div>
+                      
+                      <div className="pt-4 flex flex-col gap-2">
+                          <button 
+                            onClick={() => loadProjectAsModule(editingProject)}
+                            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-transform active:scale-95"
+                          >
+                              <FolderDown size={20} /> Carregar no Workspace
+                          </button>
+                          <p className="text-xs text-center text-slate-400 mb-2">Adiciona este projeto como um módulo na tela principal.</p>
+                          
+                          <div className="border-t pt-3 mt-2 flex justify-between items-center">
+                             <span className="text-xs text-red-400 cursor-pointer hover:underline hover:text-red-600" onClick={() => handleDeleteProject(editingProject.id)}>Excluir Projeto</span>
+                          </div>
+                      </div>
+                  </div>
+              </div>
+          </div>
+      )}
 
       <header className="bg-slate-900 text-white p-4 shadow-lg sticky top-0 z-40">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
@@ -486,23 +572,42 @@ const OtimizadorCorteAco = ({ user }) => {
                 </div>
             </div>
 
-            {/* Upload Area */}
+            {/* Upload Area & Modulos Carregados */}
             <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
-              <h2 className="text-lg font-semibold mb-3 text-slate-700">Importar Arquivos</h2>
+              <h2 className="text-lg font-semibold mb-3 text-slate-700">Arquivos e Módulos</h2>
               <div className="border-2 border-dashed border-blue-200 rounded-lg p-6 sm:p-10 text-center hover:bg-blue-50 transition cursor-pointer relative group">
                   <input ref={fileInputRef} type="file" multiple accept=".pdf,.txt,.csv" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                   <div className="flex flex-col items-center gap-3 text-blue-600">
                       {isProcessing ? <RefreshCw className="animate-spin w-10 h-10" /> : <Upload className="w-10 h-10 group-hover:scale-110 transition-transform" />}
-                      <span className="font-bold text-sm sm:text-base">{isProcessing ? "Lendo arquivos..." : "Clique ou Arraste seus PDFs aqui"}</span>
+                      <span className="font-bold text-sm sm:text-base">{isProcessing ? "Lendo arquivos..." : "Clique ou Arraste PDFs aqui"}</span>
                   </div>
               </div>
-              {/* Arquivos Carregados */}
+              
+              {/* Arquivos e Projetos Carregados */}
               {uploadedFiles.length > 0 && (
                   <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                       {uploadedFiles.map((file, idx) => (
-                          <div key={idx} className={`flex items-center gap-2 p-2 rounded border text-xs sm:text-sm ${file.status === 'erro' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'}`}>
-                              <File size={14} /> <span className="truncate flex-1">{file.name}</span>
-                              <button onClick={() => removeFile(file.name)} className="text-slate-400 hover:text-red-600"><XCircle size={16} /></button>
+                          <div 
+                            key={idx} 
+                            // Renderização Condicional: AZUL para Projeto, VERDE para Arquivo
+                            className={`flex items-center gap-2 p-3 rounded border shadow-sm transition-all ${
+                                file.type === 'project' 
+                                ? 'bg-blue-50 border-blue-200 text-blue-800' 
+                                : file.status === 'erro' 
+                                    ? 'bg-red-50 border-red-200 text-red-700' 
+                                    : 'bg-green-50 border-green-200 text-green-700'
+                            }`}
+                          >
+                              {file.type === 'project' ? <FolderHeart size={18} className="text-blue-500"/> : <File size={18} className="text-green-500"/>}
+                              
+                              <div className="flex-1 overflow-hidden">
+                                  <span className="font-bold text-sm block truncate">{file.name}</span>
+                                  <span className="text-xs opacity-70 block">
+                                      {file.type === 'project' ? 'Módulo Carregado' : 'Arquivo PDF Importado'}
+                                  </span>
+                              </div>
+
+                              <button onClick={() => removeFileOrProject(file)} className="text-slate-400 hover:text-red-600 p-1"><XCircle size={18} /></button>
                           </div>
                       ))}
                   </div>
@@ -547,7 +652,12 @@ const OtimizadorCorteAco = ({ user }) => {
                           </td>
                           <td className="px-4 py-2"><input type="number" value={item.qty} onChange={(e) => updateItem(item.id, 'qty', parseInt(e.target.value))} className="w-16 p-1 border rounded font-bold text-blue-800 text-center" /></td>
                           <td className="px-4 py-2"><input type="number" value={item.length} onChange={(e) => updateItem(item.id, 'length', parseFloat(e.target.value))} className="w-20 p-1 border rounded text-center" /></td>
-                          <td className="px-4 py-2 text-xs text-slate-400 max-w-[100px] truncate" title={item.origin}>{item.origin}</td>
+                          <td className="px-4 py-2 text-xs text-slate-400 max-w-[100px] truncate" title={item.origin}>
+                              {item.origin && item.origin.includes('[PROJETO]') 
+                                ? <span className="text-blue-500 font-semibold">{item.origin}</span>
+                                : item.origin
+                              }
+                          </td>
                           <td className="px-4 py-2 text-right"><button onClick={() => removeItem(item.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button></td>
                         </tr>
                       ))}
