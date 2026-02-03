@@ -1,7 +1,115 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Trash2, Plus, Download, Clipboard, ArrowRight, Save, RefreshCw, FileText, Settings, Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, FolderUp, X, Eraser } from 'lucide-react';
+import { Trash2, Plus, Download, Clipboard, ArrowRight, Save, RefreshCw, FileText, Settings, Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, FolderUp, X, Eraser, LogOut, Lock } from 'lucide-react';
 
-const OtimizadorCorteAco = () => {
+// --- FIREBASE CONFIGURATION & IMPORTS ---
+import { initializeApp } from "firebase/app";
+import { getAuth, signInWithEmailAndPassword, onAuthStateChanged, signOut } from "firebase/auth";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyACYH1e2FyvW0_xwbyePye_tPA2GB7BpQs",
+  authDomain: "planodecorte-8c2d9.firebaseapp.com",
+  projectId: "planodecorte-8c2d9",
+  storageBucket: "planodecorte-8c2d9.firebasestorage.app",
+  messagingSenderId: "816729895481",
+  appId: "1:816729895481:web:b97c7089897216c28ed3e8"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+
+// --- COMPONENTE DE LOGIN ---
+const LoginScreen = ({ onLoginSuccess }) => {
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleLogin = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      // O onAuthStateChanged no componente pai vai lidar com a transição
+    } catch (err) {
+      console.error(err);
+      let msg = "Erro ao fazer login.";
+      if (err.code === 'auth/invalid-credential' || err.code === 'auth/wrong-password' || err.code === 'auth/user-not-found') {
+        msg = "E-mail ou senha incorretos.";
+      } else if (err.code === 'auth/invalid-email') {
+        msg = "Formato de e-mail inválido.";
+      } else if (err.code === 'auth/too-many-requests') {
+        msg = "Muitas tentativas. Tente novamente mais tarde.";
+      }
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-100 flex items-center justify-center p-4 font-sans">
+      <div className="bg-white rounded-xl shadow-2xl p-8 w-full max-w-md border border-slate-200">
+        <div className="flex flex-col items-center mb-8">
+          <div className="bg-indigo-600 p-4 rounded-full shadow-lg mb-4">
+            <Lock className="w-8 h-8 text-white" />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-800">Acesso Restrito</h1>
+          <p className="text-slate-500 text-sm">Otimizador de Corte & Dobra</p>
+        </div>
+
+        <form onSubmit={handleLogin} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">E-mail</label>
+            <input 
+              type="email" 
+              required
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all"
+              placeholder="seu@email.com"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Senha</label>
+            <input 
+              type="password" 
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full px-4 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:outline-none transition-all"
+              placeholder="••••••••"
+            />
+          </div>
+
+          {error && (
+            <div className="bg-red-50 text-red-600 text-sm p-3 rounded-lg flex items-center gap-2">
+              <XCircle size={16} /> {error}
+            </div>
+          )}
+
+          <button 
+            type="submit" 
+            disabled={loading}
+            className={`w-full py-3 rounded-lg font-bold text-white shadow-md transition-all flex justify-center items-center gap-2 ${loading ? 'bg-indigo-400 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 hover:scale-[1.02]'}`}
+          >
+            {loading ? <RefreshCw className="animate-spin" size={20} /> : "ENTRAR"}
+          </button>
+        </form>
+        
+        <div className="mt-6 text-center text-xs text-slate-400 border-t pt-4">
+          Acesso exclusivo para funcionários autorizados.
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- COMPONENTE PRINCIPAL (OTIMIZADOR) ---
+const OtimizadorCorteAco = ({ user, onLogout }) => {
   // --- Estados ---
   const [activeTab, setActiveTab] = useState('input'); // input, inventory, results
   const [items, setItems] = useState([]); // DEMANDA
@@ -40,7 +148,7 @@ const OtimizadorCorteAco = () => {
 
   // --- Carregar Scripts Externos ---
   useEffect(() => {
-    // PDF.js
+    // 1. Carrega PDF.js
     const scriptPdf = document.createElement('script');
     scriptPdf.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
     scriptPdf.async = true;
@@ -49,18 +157,20 @@ const OtimizadorCorteAco = () => {
     };
     document.body.appendChild(scriptPdf);
 
-    // jsPDF
+    // 2. Carrega jsPDF e DEPOIS carrega AutoTable (Sequencial para evitar erro no botão de estoque)
     const scriptJsPdf = document.createElement('script');
     scriptJsPdf.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
     scriptJsPdf.async = true;
+    scriptJsPdf.onload = () => {
+        // Só carrega o plugin depois que o principal terminou
+        const scriptAutoTable = document.createElement('script');
+        scriptAutoTable.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js';
+        scriptAutoTable.async = true;
+        document.body.appendChild(scriptAutoTable);
+    };
     document.body.appendChild(scriptJsPdf);
     
-    // AutoTable
-    const scriptAutoTable = document.createElement('script');
-    scriptAutoTable.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js';
-    scriptAutoTable.async = true;
-    document.body.appendChild(scriptAutoTable);
-
+    // Carrega Estoque Local
     const savedInventory = localStorage.getItem('estoquePontas');
     if (savedInventory) {
       try {
@@ -75,9 +185,7 @@ const OtimizadorCorteAco = () => {
     }
 
     return () => {
-      document.body.removeChild(scriptPdf);
-      document.body.removeChild(scriptJsPdf);
-      document.body.removeChild(scriptAutoTable);
+        // Cleanup scripts se necessário (opcional)
     }
   }, []);
 
@@ -425,10 +533,25 @@ const OtimizadorCorteAco = () => {
     if (!window.jspdf) return alert("Biblioteca PDF carregando...");
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
-    doc.text("Relatório de Estoque de Pontas", 14, 20);
+    
+    // Filtra o que será impresso baseado na aba ativa
+    const inventoryToPrint = activeInventoryBitola === 'todas'
+        ? inventory
+        : inventory.filter(i => Math.abs(i.bitola - parseFloat(activeInventoryBitola)) < 0.01);
+
+    if (inventoryToPrint.length === 0) {
+        return alert(`Nenhum item para exibir no relatório (${activeInventoryBitola === 'todas' ? 'Estoque vazio' : 'Bitola vazia'}).`);
+    }
+
+    const titleText = activeInventoryBitola === 'todas' 
+        ? "Relatório de Estoque (Geral)" 
+        : `Relatório de Estoque - Bitola ${parseFloat(activeInventoryBitola).toFixed(1)}mm`;
+
+    doc.text(titleText, 14, 20);
     doc.setFontSize(10);
     doc.text(`Gerado em: ${new Date().toLocaleString()}`, 14, 26);
-    const tableData = inventory
+    
+    const tableData = inventoryToPrint
       .sort((a,b) => a.bitola - b.bitola || b.length - a.length)
       .map(item => [
           `${item.bitola.toFixed(1)} mm`,
@@ -437,12 +560,18 @@ const OtimizadorCorteAco = () => {
           `${(item.length * item.qty / 100).toFixed(2)} m`,
           item.source || '-'
     ]);
-    doc.autoTable({
-        head: [['Bitola', 'Qtd', 'Comprimento Unit.', 'Total Linear', 'Origem']],
-        body: tableData,
-        startY: 30,
-    });
-    doc.save(`Relatorio_Estoque_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`);
+
+    // Verifica se autoTable está carregado
+    if (doc.autoTable) {
+        doc.autoTable({
+            head: [['Bitola', 'Qtd', 'Comprimento Unit.', 'Total Linear', 'Origem']],
+            body: tableData,
+            startY: 30,
+        });
+        doc.save(`Relatorio_Estoque_${activeInventoryBitola === 'todas' ? 'Geral' : activeInventoryBitola + 'mm'}_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`);
+    } else {
+        alert("Erro: O plugin de tabela PDF não carregou corretamente. Tente recarregar a página.");
+    }
   };
 
   // --- OTIMIZAÇÃO E AGRUPAMENTO ---
@@ -572,16 +701,27 @@ const OtimizadorCorteAco = () => {
     let yPos = 20;
     
     doc.setFontSize(18);
-    doc.text("Plano de Corte - Otimizador de Aço", 105, yPos, { align: 'center' });
+    const titleText = activeResultsBitola === 'todas' 
+        ? "Plano de Corte - Geral" 
+        : `Plano de Corte - Bitola ${parseFloat(activeResultsBitola).toFixed(1)}mm`;
+
+    doc.text(titleText, 105, yPos, { align: 'center' });
     yPos += 15;
     
     doc.setFontSize(10);
     doc.text(`Data: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`, 105, yPos, { align: 'center' });
     yPos += 15;
 
-    // Filtra para o PDF apenas o que está sendo visualizado na tela, ou tudo?
-    // Geralmente PDF imprime tudo, mas podemos dar opção. Por padrão, vamos imprimir TUDO.
-    results.forEach(group => {
+    // Filtra os resultados para imprimir com base na aba ativa
+    const resultsToPrint = activeResultsBitola === 'todas'
+        ? results
+        : results.filter(group => Math.abs(parseFloat(group.bitola) - parseFloat(activeResultsBitola)) < 0.01);
+
+    if (resultsToPrint.length === 0) {
+        return alert("Não há dados para gerar PDF nesta aba.");
+    }
+
+    resultsToPrint.forEach(group => {
         if (yPos > 270) { doc.addPage(); yPos = 20; }
         doc.setFillColor(240, 240, 240);
         doc.rect(10, yPos - 5, 190, 8, 'F');
@@ -632,7 +772,7 @@ const OtimizadorCorteAco = () => {
         });
         yPos += 5;
     });
-    doc.save(`Plano_Corte_${new Date().toISOString().slice(0,10)}.pdf`);
+    doc.save(`Plano_Corte_${activeResultsBitola === 'todas' ? 'Geral' : activeResultsBitola + 'mm'}_${new Date().toISOString().slice(0,10)}.pdf`);
   };
 
   const consolidateLeftovers = () => {
@@ -697,18 +837,12 @@ const OtimizadorCorteAco = () => {
 
   // --- Função Helper para Renderizar Abas de Bitola ---
   const renderBitolaTabs = (current, setFunction, availableBitolas) => {
-    // Adiciona 'todas' no início da lista
     const tabs = ['todas', ...availableBitolas];
     return (
         <div className="flex overflow-x-auto gap-1 border-b border-slate-200 mb-4 pb-0 no-scrollbar items-end h-10 px-1">
             {tabs.map(tab => {
                 const isActive = current === tab;
                 let label = tab === 'todas' ? 'Todas' : `${parseFloat(tab).toFixed(1)} mm`;
-                if(tab !== 'todas') {
-                    // Contagem opcional para dar mais contexto (se for aba de results, por exemplo)
-                    // Mas manter simples é melhor por agora.
-                }
-
                 return (
                     <button
                         key={tab}
@@ -728,17 +862,13 @@ const OtimizadorCorteAco = () => {
     );
   };
 
-  // --- Função para determinar a classe do botão Resultado ---
   const getResultsTabClass = () => {
-      // Se estiver ativo
       if (activeTab === 'results') {
           return 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm';
       }
-      // Se não estiver ativo mas tiver resultados (clicável e visualmente disponível)
       if (results) {
           return 'bg-green-50 text-green-700 hover:bg-green-100 border-b-2 border-transparent hover:border-green-300 transition-all';
       }
-      // Se não tiver resultados (bloqueado)
       return 'text-slate-400 cursor-not-allowed';
   };
 
@@ -750,8 +880,18 @@ const OtimizadorCorteAco = () => {
             <Settings className="w-6 h-6 text-yellow-500" />
             <h1 className="text-xl font-bold tracking-tight">Otimizador Corte & Dobra</h1>
           </div>
-          <div className="text-sm text-slate-400 bg-slate-800 px-3 py-1 rounded-full border border-slate-700">
-            Barras Padrão: 1200cm (Automático)
+          <div className="flex items-center gap-4">
+             <div className="text-sm text-slate-400 bg-slate-800 px-3 py-1 rounded-full border border-slate-700 hidden md:block">
+               Barras Padrão: 1200cm
+             </div>
+             {user && (
+               <button 
+                 onClick={onLogout}
+                 className="flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-lg text-sm transition-colors font-medium"
+               >
+                 <LogOut size={16} /> Sair
+               </button>
+             )}
           </div>
         </div>
       </header>
@@ -985,7 +1125,7 @@ const OtimizadorCorteAco = () => {
                     </div>
                     
                     <button onClick={exportInventoryPDF} className="flex items-center gap-1 bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-md hover:bg-indigo-100 text-xs font-semibold">
-                        <Printer size={14} /> Relatório PDF
+                        <Printer size={14} /> Relatório PDF {activeInventoryBitola !== 'todas' ? `(${parseFloat(activeInventoryBitola).toFixed(1)}mm)` : ''}
                     </button>
                     <button onClick={clearInventory} className="text-red-500 text-sm hover:underline px-2">Zerar</button>
                     <button onClick={openAddStockModal} className="flex items-center gap-1 bg-green-600 text-white px-3 py-1.5 rounded-md hover:bg-green-700 text-sm">
@@ -1220,7 +1360,7 @@ const OtimizadorCorteAco = () => {
                             onClick={generatePDF}
                             className="bg-white text-indigo-700 border border-indigo-200 px-4 py-2 rounded shadow hover:bg-indigo-50 flex items-center gap-2"
                         >
-                            <Printer size={18} /> Baixar PDF
+                            <Printer size={18} /> Baixar PDF {activeResultsBitola !== 'todas' ? `(${parseFloat(activeResultsBitola).toFixed(1)}mm)` : ''}
                         </button>
                         <button 
                             onClick={consolidateLeftovers}
@@ -1328,4 +1468,36 @@ const OtimizadorCorteAco = () => {
   );
 };
 
-export default OtimizadorCorteAco;
+// --- APP WRAPPER (Gerencia a troca entre Login e Otimizador) ---
+const App = () => {
+  const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+      setUser(currentUser);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  const handleLogout = async () => {
+    await signOut(auth);
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+        <RefreshCw className="animate-spin text-indigo-600 w-12 h-12" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginScreen />;
+  }
+
+  return <OtimizadorCorteAco user={user} onLogout={handleLogout} />;
+};
+
+export default App;
