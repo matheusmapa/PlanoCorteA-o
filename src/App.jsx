@@ -10,6 +10,10 @@ const OtimizadorCorteAco = () => {
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState([]);
   
+  // Estados de Navegação por Abas de Bitola
+  const [activeInventoryBitola, setActiveInventoryBitola] = useState('todas');
+  const [activeResultsBitola, setActiveResultsBitola] = useState('todas');
+
   // Estados do Modal de Adicionar Estoque
   const [showAddStockModal, setShowAddStockModal] = useState(false);
   const [newStockItemData, setNewStockItemData] = useState({ bitola: 10.0, length: 100, qty: 1 });
@@ -100,7 +104,6 @@ const OtimizadorCorteAco = () => {
   };
 
   // --- DERIVED STATE: Items Filtrados ---
-  // Apenas itens cujas bitolas estão habilitadas são mostrados e usados no cálculo
   const filteredItems = items.filter(item => enabledBitolas.includes(item.bitola));
 
   // --- Lógica de Leitura de PDF (Entrada) ---
@@ -180,9 +183,8 @@ const OtimizadorCorteAco = () => {
   };
 
   const parseTextToItems = (text, fileName) => {
-    // 1. LIMPEZA SEGURA
     let cleanText = text
-        .replace(/CA\s*-?\s*\d+/gi, '') // Remove CA50/CA60
+        .replace(/CA\s*-?\s*\d+/gi, '') 
         .replace(/\$/g, '')
         .replace(/\\times/g, 'x')
         .replace(/\\/g, '')
@@ -201,8 +203,6 @@ const OtimizadorCorteAco = () => {
     while ((match = bitolaRegex.exec(normalizedText)) !== null) {
         const bitolaVal = parseFloat(match[1]);
         
-        // MUDANÇA: Aceita qualquer bitola comercial, independente do filtro atual
-        // Isso permite carregar tudo e filtrar depois visualmente
         if (BITOLAS_COMERCIAIS.includes(bitolaVal)) {
             const startIndex = bitolaRegex.lastIndex;
             const contextChunk = normalizedText.substring(startIndex, startIndex + 180);
@@ -447,7 +447,6 @@ const OtimizadorCorteAco = () => {
 
   // --- OTIMIZAÇÃO E AGRUPAMENTO ---
   const runOptimization = () => {
-    // MUDANÇA: Usa filteredItems para o cálculo
     if (filteredItems.length === 0) {
         alert("Nenhum item válido para cortar (verifique se a lista está vazia ou se as bitolas estão desmarcadas).");
         return;
@@ -562,10 +561,8 @@ const OtimizadorCorteAco = () => {
 
     setResults(finalResult);
     setActiveTab('results');
-    // MUDANÇA: Não limpamos mais items automaticamente, pois o usuário pode querer mudar o filtro e recalcular
-    // setItems([]); 
-    // setUploadedFiles([]);
-    // if(fileInputRef.current) fileInputRef.current.value = '';
+    // Ao calcular, define a aba de resultados como 'todas' para mostrar o geral inicialmente
+    setActiveResultsBitola('todas');
   };
 
   const generatePDF = () => {
@@ -582,6 +579,8 @@ const OtimizadorCorteAco = () => {
     doc.text(`Data: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`, 105, yPos, { align: 'center' });
     yPos += 15;
 
+    // Filtra para o PDF apenas o que está sendo visualizado na tela, ou tudo?
+    // Geralmente PDF imprime tudo, mas podemos dar opção. Por padrão, vamos imprimir TUDO.
     results.forEach(group => {
         if (yPos > 270) { doc.addPage(); yPos = 20; }
         doc.setFillColor(240, 240, 240);
@@ -694,6 +693,39 @@ const OtimizadorCorteAco = () => {
         setResults(null);
         setActiveTab('input');
     }
+  };
+
+  // --- Função Helper para Renderizar Abas de Bitola ---
+  const renderBitolaTabs = (current, setFunction, availableBitolas) => {
+    // Adiciona 'todas' no início da lista
+    const tabs = ['todas', ...availableBitolas];
+    return (
+        <div className="flex overflow-x-auto gap-1 border-b border-slate-200 mb-4 pb-0 no-scrollbar items-end h-10 px-1">
+            {tabs.map(tab => {
+                const isActive = current === tab;
+                let label = tab === 'todas' ? 'Todas' : `${parseFloat(tab).toFixed(1)} mm`;
+                if(tab !== 'todas') {
+                    // Contagem opcional para dar mais contexto (se for aba de results, por exemplo)
+                    // Mas manter simples é melhor por agora.
+                }
+
+                return (
+                    <button
+                        key={tab}
+                        onClick={() => setFunction(tab)}
+                        className={`
+                            px-4 py-2 text-sm font-medium rounded-t-lg transition-all whitespace-nowrap border-t border-x relative
+                            ${isActive 
+                                ? 'bg-white border-indigo-200 text-indigo-700 z-10 top-[1px] shadow-[0_-2px_3px_rgba(0,0,0,0.02)] border-b-white h-10' 
+                                : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-700 h-9 mb-0.5'}
+                        `}
+                    >
+                        {label}
+                    </button>
+                )
+            })}
+        </div>
+    );
   };
 
   // --- Função para determinar a classe do botão Resultado ---
@@ -961,8 +993,11 @@ const OtimizadorCorteAco = () => {
                     </button>
                   </div>
               </div>
+              
+              {/* --- ABAS DE BITOLA (INVENTORY) --- */}
+              {renderBitolaTabs(activeInventoryBitola, setActiveInventoryBitola, BITOLAS_COMERCIAIS)}
 
-              <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+              <div className="overflow-x-auto max-h-[500px] overflow-y-auto border border-slate-200 rounded-b-lg">
                 <table className="w-full text-sm text-left">
                     <thead className="text-xs text-slate-500 uppercase bg-yellow-50 sticky top-0">
                         <tr>
@@ -974,10 +1009,23 @@ const OtimizadorCorteAco = () => {
                         </tr>
                     </thead>
                     <tbody>
-                        {inventory.length === 0 ? (
-                            <tr><td colSpan="5" className="text-center py-8 text-slate-400">Nenhuma ponta no estoque. O sistema usará apenas barras novas de 1200cm.</td></tr>
-                        ) : (
-                            inventory.sort((a,b) => b.bitola - a.bitola).map(item => (
+                        {(() => {
+                            // Filtro por aba
+                            const displayedInventory = activeInventoryBitola === 'todas'
+                                ? inventory
+                                : inventory.filter(i => Math.abs(i.bitola - parseFloat(activeInventoryBitola)) < 0.01);
+                            
+                            if (displayedInventory.length === 0) {
+                                return (
+                                    <tr><td colSpan="5" className="text-center py-8 text-slate-400">
+                                        {activeInventoryBitola === 'todas' 
+                                            ? "Nenhuma ponta no estoque." 
+                                            : `Nenhuma ponta de ${parseFloat(activeInventoryBitola).toFixed(1)}mm no estoque.`}
+                                    </td></tr>
+                                );
+                            }
+
+                            return displayedInventory.sort((a,b) => b.bitola - a.bitola).map(item => (
                                 <tr key={item.id} className="border-b border-slate-100 hover:bg-yellow-50">
                                     <td className="px-4 py-2">
                                         <select 
@@ -1017,7 +1065,7 @@ const OtimizadorCorteAco = () => {
                                     </td>
                                 </tr>
                             ))
-                        )}
+                        })()}
                     </tbody>
                 </table>
               </div>
@@ -1190,58 +1238,76 @@ const OtimizadorCorteAco = () => {
                         </button>
                     </div>
                 </div>
+                
+                {/* --- ABAS DE BITOLA (RESULTS) --- */}
+                {/* Calcula quais bitolas realmente tem resultados para mostrar nas abas */}
+                {(() => {
+                    const resultBitolas = results.map(r => parseFloat(r.bitola)).sort((a,b) => a-b);
+                    return renderBitolaTabs(activeResultsBitola, setActiveResultsBitola, resultBitolas);
+                })()}
 
-                {results.map((group, gIdx) => {
-                    const totalBars = group.bars.reduce((acc, b) => acc + b.count, 0);
-                    return (
-                        <div key={gIdx} className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
-                            <div className="bg-slate-100 px-6 py-3 border-b border-slate-200 flex justify-between">
-                                <h3 className="font-bold text-lg text-slate-800">Bitola: {group.bitola}mm</h3>
-                                <span className="text-sm text-slate-500">{totalBars} barras necessárias</span>
-                            </div>
-                            <div className="p-6 space-y-6">
-                                {group.bars.map((bar, bIdx) => (
-                                    <div key={bIdx} className="flex flex-col gap-1 pb-4 border-b border-slate-100 last:border-0 last:pb-0">
-                                        <div className="flex justify-between text-sm text-slate-600 mb-1 items-center">
-                                            <div className="flex items-center gap-3">
-                                                <span className="bg-slate-800 text-white font-bold px-3 py-1 rounded-full text-xs">
-                                                    {bar.count}x
-                                                </span>
-                                                <span className="font-semibold uppercase tracking-wider flex items-center gap-1 text-xs">
-                                                    {bar.type === 'nova' ? (
-                                                        <span className="text-blue-600 bg-blue-100 px-2 py-0.5 rounded border border-blue-200">Barra Nova (12m)</span>
-                                                    ) : (
-                                                        <span className="text-amber-600 bg-amber-100 px-2 py-0.5 rounded border border-amber-200">Ponta Estoque ({bar.originalLength}cm)</span>
-                                                    )}
-                                                </span>
+                {/* --- CONTEÚDO RESULTS FILTRADO --- */}
+                {(() => {
+                    const displayedResults = activeResultsBitola === 'todas'
+                        ? results
+                        : results.filter(group => Math.abs(parseFloat(group.bitola) - parseFloat(activeResultsBitola)) < 0.01);
+                    
+                    if (displayedResults.length === 0) {
+                         return <div className="text-center text-slate-500 py-12">Nenhum resultado para esta bitola.</div>;
+                    }
+
+                    return displayedResults.map((group, gIdx) => {
+                        const totalBars = group.bars.reduce((acc, b) => acc + b.count, 0);
+                        return (
+                            <div key={gIdx} className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+                                <div className="bg-slate-100 px-6 py-3 border-b border-slate-200 flex justify-between">
+                                    <h3 className="font-bold text-lg text-slate-800">Bitola: {group.bitola}mm</h3>
+                                    <span className="text-sm text-slate-500">{totalBars} barras necessárias</span>
+                                </div>
+                                <div className="p-6 space-y-6">
+                                    {group.bars.map((bar, bIdx) => (
+                                        <div key={bIdx} className="flex flex-col gap-1 pb-4 border-b border-slate-100 last:border-0 last:pb-0">
+                                            <div className="flex justify-between text-sm text-slate-600 mb-1 items-center">
+                                                <div className="flex items-center gap-3">
+                                                    <span className="bg-slate-800 text-white font-bold px-3 py-1 rounded-full text-xs">
+                                                        {bar.count}x
+                                                    </span>
+                                                    <span className="font-semibold uppercase tracking-wider flex items-center gap-1 text-xs">
+                                                        {bar.type === 'nova' ? (
+                                                            <span className="text-blue-600 bg-blue-100 px-2 py-0.5 rounded border border-blue-200">Barra Nova (12m)</span>
+                                                        ) : (
+                                                            <span className="text-amber-600 bg-amber-100 px-2 py-0.5 rounded border border-amber-200">Ponta Estoque ({bar.originalLength}cm)</span>
+                                                        )}
+                                                    </span>
+                                                </div>
+                                                <span className="font-mono text-xs">Sobra: <span className={bar.remaining > 100 ? "text-green-600 font-bold" : "text-slate-600"}>{bar.remaining.toFixed(1)}cm</span></span>
                                             </div>
-                                            <span className="font-mono text-xs">Sobra: <span className={bar.remaining > 100 ? "text-green-600 font-bold" : "text-slate-600"}>{bar.remaining.toFixed(1)}cm</span></span>
-                                        </div>
-                                        <div className="h-14 w-full bg-slate-200 rounded overflow-hidden flex border border-slate-300 relative">
-                                            {bar.cuts.map((cut, cIdx) => {
-                                                const widthPerc = (cut / bar.originalLength) * 100;
-                                                return (
-                                                    <div 
-                                                        key={cIdx} 
-                                                        style={{ width: `${widthPerc}%` }}
-                                                        className="h-full bg-blue-500 border-r border-white flex flex-col items-center justify-center text-white text-xs overflow-hidden whitespace-nowrap hover:bg-blue-600 transition-colors relative group"
-                                                        title={`Cortar peça de ${cut}cm`}
-                                                    >
-                                                        <span className="font-bold text-sm">{cut}</span>
-                                                        <span className="text-[10px] opacity-75">cm</span>
-                                                    </div>
-                                                )
-                                            })}
-                                            <div className="flex-1 bg-slate-300 pattern-diagonal-lines flex items-center justify-center">
-                                                {bar.remaining > 10 && <span className="text-xs text-slate-500 italic font-medium">{bar.remaining.toFixed(0)}cm</span>}
+                                            <div className="h-14 w-full bg-slate-200 rounded overflow-hidden flex border border-slate-300 relative">
+                                                {bar.cuts.map((cut, cIdx) => {
+                                                    const widthPerc = (cut / bar.originalLength) * 100;
+                                                    return (
+                                                        <div 
+                                                            key={cIdx} 
+                                                            style={{ width: `${widthPerc}%` }}
+                                                            className="h-full bg-blue-500 border-r border-white flex flex-col items-center justify-center text-white text-xs overflow-hidden whitespace-nowrap hover:bg-blue-600 transition-colors relative group"
+                                                            title={`Cortar peça de ${cut}cm`}
+                                                        >
+                                                            <span className="font-bold text-sm">{cut}</span>
+                                                            <span className="text-[10px] opacity-75">cm</span>
+                                                        </div>
+                                                    )
+                                                })}
+                                                <div className="flex-1 bg-slate-300 pattern-diagonal-lines flex items-center justify-center">
+                                                    {bar.remaining > 10 && <span className="text-xs text-slate-500 italic font-medium">{bar.remaining.toFixed(0)}cm</span>}
+                                                </div>
                                             </div>
                                         </div>
-                                    </div>
-                                ))}
+                                    ))}
+                                </div>
                             </div>
-                        </div>
-                    );
-                })}
+                        );
+                    });
+                })()}
             </div>
         )}
 
@@ -1249,6 +1315,13 @@ const OtimizadorCorteAco = () => {
       <style>{`
         .pattern-diagonal-lines {
             background-image: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(255,255,255,0.5) 5px, rgba(255,255,255,0.5) 10px);
+        }
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
+        }
+        .no-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
         }
       `}</style>
     </div>
