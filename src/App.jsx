@@ -19,6 +19,9 @@ const OtimizadorCorteAco = ({ user }) => {
   const [results, setResults] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   
+  // NOVA CHAVE: Usar sobras de estoque? (Padrão: Sim)
+  const [useLeftovers, setUseLeftovers] = useState(true);
+  
   // Arquivos: uploadedFiles agora pode conter arquivos REAIS ou PROJETOS CARREGADOS
   const [uploadedFiles, setUploadedFiles] = useState([]);
 
@@ -406,14 +409,17 @@ const OtimizadorCorteAco = ({ user }) => {
       }
   }
 
-  // --- OTIMIZAÇÃO ---
+  // --- OTIMIZAÇÃO (MODIFICADA PARA USAR O ESTADO) ---
   const runOptimization = () => {
     const itemsToCut = filteredItems.filter(item => item.selected);
     if (itemsToCut.length === 0) return alert("Nenhum item válido para cortar.");
     setIsProcessing(true);
     setTimeout(() => {
         try {
-            const finalResult = calculateCutPlan(itemsToCut, inventory, BARRA_PADRAO, PERDA_CORTE);
+            // SE A CHAVE ESTIVER LIGADA, USA O INVENTORY. SE NÃO, USA ARRAY VAZIO.
+            const inventoryToUse = useLeftovers ? inventory : [];
+            const finalResult = calculateCutPlan(itemsToCut, inventoryToUse, BARRA_PADRAO, PERDA_CORTE);
+            
             setResults(finalResult);
             setActiveTab('results');
             setActiveResultsBitola('todas');
@@ -794,7 +800,26 @@ const OtimizadorCorteAco = ({ user }) => {
               )}
             </div>
 
-            <div className="flex justify-end pb-8">
+            {/* BOTÕES E CONTROLES (MODIFICADO COM O CHECKBOX) */}
+            <div className="flex flex-col sm:flex-row justify-end items-center gap-4 pb-8">
+                
+                {/* --- NOVA CHAVE DE USAR PONTAS --- */}
+                <label className="flex items-center gap-3 cursor-pointer bg-white px-4 py-3 rounded-md border border-slate-200 shadow-sm hover:border-indigo-300 transition-all select-none group">
+                    <div className={`w-5 h-5 flex items-center justify-center rounded border transition-colors ${useLeftovers ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
+                        {/* Ícone de Check */}
+                        {useLeftovers && <Check size={14} className="text-white" />}
+                    </div>
+                    <input 
+                        type="checkbox" 
+                        className="hidden" 
+                        checked={useLeftovers} 
+                        onChange={(e) => setUseLeftovers(e.target.checked)} 
+                    />
+                    <span className={`text-sm font-bold ${useLeftovers ? 'text-indigo-700' : 'text-slate-500'}`}>
+                        Usar Pontas de Estoque?
+                    </span>
+                </label>
+
                 <button onClick={runOptimization} disabled={filteredItems.length === 0 || isProcessing} className={`w-full sm:w-auto px-8 py-3 rounded-md shadow-md font-bold flex items-center justify-center gap-2 transition-all ${filteredItems.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:scale-105'}`}>
                     {isProcessing ? <RefreshCw className="animate-spin" size={20} /> : <RefreshCw size={20} />}
                     {isProcessing ? "CALCULANDO..." : "CALCULAR OTIMIZAÇÃO"}
