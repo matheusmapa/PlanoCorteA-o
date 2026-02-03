@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Trash2, Plus, Download, Clipboard, Save, RefreshCw, FileText, Settings, Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, FolderUp, X, Eraser, LogOut, User, Menu, FolderHeart, Calendar, Edit3, Check } from 'lucide-react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, serverTimestamp } from 'firebase/firestore';
+// ADICIONADO: setDoc para salvar documentos com ID específico
+import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, setDoc } from 'firebase/firestore';
 
 // Lógica externa
 import { extractTextFromPDF, parseTextToItems, BITOLAS_COMERCIAIS, generateId } from './pdfProcessor';
@@ -23,7 +24,7 @@ const OtimizadorCorteAco = ({ user }) => {
 
   // --- Estados do Banco de Dados ---
   const [projects, setProjects] = useState([]); // INPUT (Projetos salvos)
-  const [savedPlans, setSavedPlans] = useState([]); // OUTPUT (Planos de corte salvos) NOVO
+  const [savedPlans, setSavedPlans] = useState([]); // OUTPUT (Planos de corte salvos)
   
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [editingProject, setEditingProject] = useState(null); // Projeto sendo editado no modal
@@ -72,7 +73,7 @@ const OtimizadorCorteAco = ({ user }) => {
     };
     const cleanupScripts = loadScripts();
 
-    // 2. Carregar Estoque Local
+    // 2. Tenta carregar LocalStorage primeiro (para ter algo rápido na tela)
     const savedInventory = localStorage.getItem('estoquePontas');
     if (savedInventory) {
       try {
@@ -96,7 +97,7 @@ const OtimizadorCorteAco = ({ user }) => {
             setProjects(projectsData);
         });
 
-        // B) Planos de Corte Salvos (Output) - NOVO
+        // B) Planos de Corte Salvos (Output)
         const qPlans = query(collection(db, 'users', user.uid, 'cutPlans'), orderBy('createdAt', 'desc'));
         const unsubscribePlans = onSnapshot(qPlans, (snapshot) => {
             const plansData = snapshot.docs.map(doc => ({
@@ -106,15 +107,54 @@ const OtimizadorCorteAco = ({ user }) => {
             setSavedPlans(plansData);
         });
 
+        // C) ESTOQUE DE PONTAS (NOVO) - Escuta o documento único de estoque
+        const inventoryDocRef = doc(db, 'users', user.uid, 'appData', 'inventory');
+        const unsubscribeInventory = onSnapshot(inventoryDocRef, (docSnap) => {
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                if (data.items && Array.isArray(data.items)) {
+                    // Atualiza o estado com o que veio do banco
+                    setInventory(data.items);
+                    // Atualiza o local storage também para manter sincronia
+                    localStorage.setItem('estoquePontas', JSON.stringify(data.items));
+                }
+            }
+        });
+
         return () => {
             cleanupScripts();
             unsubscribeProjects();
             unsubscribePlans();
+            unsubscribeInventory();
         }
     }
 
     return cleanupScripts;
   }, [user]);
+
+  // --- NOVA FUNÇÃO: Atualizar Estoque (Local + Banco) ---
+  const updateInventory = async (newInv) => {
+    // 1. Atualiza visualmente na hora (Optimistic UI)
+    setInventory(newInv);
+    
+    // 2. Salva no LocalStorage (Backup)
+    localStorage.setItem('estoquePontas', JSON.stringify(newInv));
+
+    // 3. Salva no Firestore
+    if (user) {
+        try {
+            // Usamos setDoc com { merge: true } ou sobrescrevemos. 
+            // Vamos salvar num documento fixo chamado 'inventory' dentro de uma coleção 'appData'
+            await setDoc(doc(db, 'users', user.uid, 'appData', 'inventory'), {
+                items: newInv,
+                updatedAt: serverTimestamp()
+            });
+        } catch (error) {
+            console.error("Erro ao salvar estoque no banco:", error);
+            // Opcional: Mostrar um toast de erro
+        }
+    }
+  };
 
   // --- Funções: Planos de Corte (Output) ---
   const handleSaveCutPlan = async () => {
@@ -126,7 +166,7 @@ const OtimizadorCorteAco = ({ user }) => {
       try {
           await addDoc(collection(db, 'users', user.uid, 'cutPlans'), {
               name: planName,
-              results: results, // Salva o objeto de resultado inteiro
+              results: results,
               createdAt: serverTimestamp()
           });
           alert("Plano salvo com sucesso!");
@@ -231,11 +271,6 @@ const OtimizadorCorteAco = ({ user }) => {
   };
 
   // --- Funções Gerais do App ---
-
-  const saveInventoryToLocal = (newInv) => {
-    setInventory([...newInv]);
-    localStorage.setItem('estoquePontas', JSON.stringify(newInv));
-  };
 
   const handleLogout = () => {
       if(window.confirm("Deseja realmente sair?")) {
@@ -348,23 +383,26 @@ const OtimizadorCorteAco = ({ user }) => {
       const { bitola, length, qty } = newStockItemData;
       if (length <= 0 || qty <= 0) return alert("Valores inválidos");
       const newPonta = { id: generateId(), bitola: parseFloat(bitola), length: parseFloat(length), qty: parseInt(qty), source: 'estoque_manual' };
-      saveInventoryToLocal([...inventory, newPonta]);
+      // USANDO A NOVA FUNÇÃO
+      updateInventory([...inventory, newPonta]);
       setShowAddStockModal(false);
   };
 
   const updateInventoryItem = (id, field, value) => {
     const newInv = inventory.map(item => item.id === id ? { ...item, [field]: value } : item);
-    saveInventoryToLocal(newInv);
+    // USANDO A NOVA FUNÇÃO
+    updateInventory(newInv);
   };
 
   const removeInventoryItem = (id) => {
-    saveInventoryToLocal(inventory.filter(item => item.id !== id));
+    // USANDO A NOVA FUNÇÃO
+    updateInventory(inventory.filter(item => item.id !== id));
   };
 
   const clearInventory = () => {
       if(window.confirm("Tem certeza que deseja APAGAR TODO o estoque de pontas?")) {
-          saveInventoryToLocal([]);
-          setInventory([]);
+          // USANDO A NOVA FUNÇÃO
+          updateInventory([]);
       }
   }
 
@@ -435,10 +473,14 @@ const OtimizadorCorteAco = ({ user }) => {
             }
         });
     });
+    
+    // Atualiza quantidades existentes
     let updatedInventory = inventory.map(item => {
         if (usedCounts[item.id]) { const newQty = item.qty - usedCounts[item.id]; return { ...item, qty: Math.max(0, newQty) }; }
         return item;
     }).filter(item => item.qty > 0);
+
+    // Adiciona novas sobras
     results.forEach(group => {
         group.bars.forEach(barGroup => {
             if (barGroup.remaining > 50) { 
@@ -449,7 +491,10 @@ const OtimizadorCorteAco = ({ user }) => {
             }
         });
     });
-    saveInventoryToLocal(updatedInventory);
+
+    // Salva no banco e local
+    updateInventory(updatedInventory);
+    
     alert(`Estoque atualizado!`);
     setActiveTab('inventory');
   };
@@ -838,7 +883,7 @@ const OtimizadorCorteAco = ({ user }) => {
                 <div className="flex justify-between items-center bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex-wrap gap-4">
                     <div><h2 className="text-xl font-bold text-indigo-900">Plano Gerado</h2></div>
                     <div className="flex gap-2 items-center flex-wrap">
-                        {/* Botão Salvar Plano (NOVO) */}
+                        {/* Botão Salvar Plano */}
                         <button onClick={handleSaveCutPlan} className="bg-indigo-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-700 transition-colors">
                             <Save size={16} /> Salvar Plano
                         </button>
