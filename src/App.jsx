@@ -18,12 +18,13 @@ const OtimizadorCorteAco = ({ user }) => {
   const [results, setResults] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   
-  // Alterado: uploadedFiles agora pode conter arquivos REAIS ou PROJETOS CARREGADOS
-  // Estrutura: { id, name, type: 'file' | 'project', status: 'ok' | 'erro' | 'lendo' }
+  // Arquivos: uploadedFiles agora pode conter arquivos REAIS ou PROJETOS CARREGADOS
   const [uploadedFiles, setUploadedFiles] = useState([]);
 
-  // --- Estados do Banco de Dados / Projetos ---
-  const [projects, setProjects] = useState([]);
+  // --- Estados do Banco de Dados ---
+  const [projects, setProjects] = useState([]); // INPUT (Projetos salvos)
+  const [savedPlans, setSavedPlans] = useState([]); // OUTPUT (Planos de corte salvos) NOVO
+  
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [editingProject, setEditingProject] = useState(null); // Projeto sendo editado no modal
   
@@ -83,27 +84,80 @@ const OtimizadorCorteAco = ({ user }) => {
       } catch (e) { console.error(e); }
     }
 
-    // 3. Ouvinte do Firestore (Projetos Salvos)
+    // 3. Ouvintes do Firestore
     if (user) {
-        const q = query(collection(db, 'users', user.uid, 'projects'), orderBy('createdAt', 'desc'));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
+        // A) Projetos de Demanda (Input)
+        const qProjects = query(collection(db, 'users', user.uid, 'projects'), orderBy('createdAt', 'desc'));
+        const unsubscribeProjects = onSnapshot(qProjects, (snapshot) => {
             const projectsData = snapshot.docs.map(doc => ({
                 id: doc.id,
                 ...doc.data()
             }));
             setProjects(projectsData);
         });
+
+        // B) Planos de Corte Salvos (Output) - NOVO
+        const qPlans = query(collection(db, 'users', user.uid, 'cutPlans'), orderBy('createdAt', 'desc'));
+        const unsubscribePlans = onSnapshot(qPlans, (snapshot) => {
+            const plansData = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            }));
+            setSavedPlans(plansData);
+        });
+
         return () => {
             cleanupScripts();
-            unsubscribe();
+            unsubscribeProjects();
+            unsubscribePlans();
         }
     }
 
     return cleanupScripts;
   }, [user]);
 
-  // --- Funções de Banco de Dados (Projetos) ---
-  
+  // --- Funções: Planos de Corte (Output) ---
+  const handleSaveCutPlan = async () => {
+      if (!results) return alert("Não há resultado gerado para salvar.");
+      
+      const planName = window.prompt("Nome para este Plano de Corte (ex: Lote A - 03/02):");
+      if (!planName) return;
+
+      try {
+          await addDoc(collection(db, 'users', user.uid, 'cutPlans'), {
+              name: planName,
+              results: results, // Salva o objeto de resultado inteiro
+              createdAt: serverTimestamp()
+          });
+          alert("Plano salvo com sucesso!");
+          setIsSidebarOpen(true);
+      } catch (error) {
+          console.error("Erro ao salvar plano:", error);
+          alert("Erro ao salvar o plano.");
+      }
+  };
+
+  const handleLoadCutPlan = (plan) => {
+      if(window.confirm(`Carregar o plano "${plan.name}"? Isso substituirá o resultado atual da tela.`)) {
+          setResults(plan.results);
+          setActiveTab('results');
+          setActiveResultsBitola('todas');
+          setIsSidebarOpen(false);
+      }
+  };
+
+  const handleDeleteCutPlan = async (planId, e) => {
+      e.stopPropagation();
+      if(window.confirm("Excluir este plano de corte do histórico permanentemente?")) {
+          try {
+              await deleteDoc(doc(db, 'users', user.uid, 'cutPlans', planId));
+          } catch (error) {
+              alert("Erro ao excluir.");
+          }
+      }
+  };
+
+  // --- Funções: Projetos de Demanda (Input) ---
   const handleSaveProject = async () => {
       if (items.length === 0) return alert("A lista de corte está vazia. Nada para salvar.");
       
@@ -113,7 +167,7 @@ const OtimizadorCorteAco = ({ user }) => {
       try {
           await addDoc(collection(db, 'users', user.uid, 'projects'), {
               name: projectName,
-              items: items, // Salva o array de itens atual
+              items: items,
               createdAt: serverTimestamp()
           });
           alert("Projeto salvo com sucesso! Confira na aba lateral.");
@@ -124,7 +178,6 @@ const OtimizadorCorteAco = ({ user }) => {
       }
   };
 
-  // Atualizar nome do projeto no Firestore
   const handleUpdateProjectName = async (projectId, newName) => {
       if (!newName.trim()) return;
       try {
@@ -138,55 +191,46 @@ const OtimizadorCorteAco = ({ user }) => {
       }
   };
 
-  // Carregar projeto como um "Módulo/Arquivo"
   const loadProjectAsModule = (project) => {
-      // Verifica se já está carregado
       if (uploadedFiles.some(f => f.id === project.id)) {
           alert("Este projeto já foi adicionado à lista.");
           return;
       }
-
       const projectOriginName = `[PROJETO] ${project.name}`;
-
-      // Cria itens com novos IDs e origem marcada
       const newItems = project.items.map(item => ({
           ...item,
           id: generateId(),
           origin: projectOriginName
       }));
 
-      // Adiciona aos itens
       setItems(prev => [...prev, ...newItems]);
-
-      // Adiciona à lista de "arquivos" (Chips)
       setUploadedFiles(prev => [
           ...prev, 
           { 
               id: project.id, 
               name: project.name, 
-              originName: projectOriginName, // Usado para remoção
+              originName: projectOriginName,
               type: 'project', 
               status: 'ok',
               count: newItems.length
           }
       ]);
-
-      setEditingProject(null); // Fecha modal
-      setIsSidebarOpen(false); // Fecha sidebar
+      setEditingProject(null);
+      setIsSidebarOpen(false);
   };
 
   const handleDeleteProject = async (projectId) => {
       if(window.confirm("Tem certeza que deseja excluir este projeto PERMANENTEMENTE do banco de dados?")) {
           try {
               await deleteDoc(doc(db, 'users', user.uid, 'projects', projectId));
-              setEditingProject(null); // Fecha modal se estiver aberto
+              setEditingProject(null);
           } catch (error) {
               alert("Erro ao excluir.");
           }
       }
   };
 
-  // --- Funções do App ---
+  // --- Funções Gerais do App ---
 
   const saveInventoryToLocal = (newInv) => {
     setInventory([...newInv]);
@@ -221,7 +265,6 @@ const OtimizadorCorteAco = ({ user }) => {
 
     for (const file of files) {
         if (newUploadedFiles.some(f => f.name === file.name && f.type === 'file')) {
-             // Já existe, remove itens antigos desse arquivo para reprocessar
              setItems(prev => prev.filter(i => i.origin !== file.name));
         } else {
              newUploadedFiles.push({ id: generateId(), name: file.name, size: file.size, type: 'file', status: 'lendo' });
@@ -256,10 +299,7 @@ const OtimizadorCorteAco = ({ user }) => {
   };
 
   const removeFileOrProject = (fileData) => {
-      // Remove da lista de chips
       setUploadedFiles(prev => prev.filter(f => f.id !== fileData.id));
-      
-      // Remove os itens associados
       const originToRemove = fileData.type === 'project' ? fileData.originName : fileData.name;
       setItems(prev => prev.filter(i => i.origin !== originToRemove));
   };
@@ -433,40 +473,82 @@ const OtimizadorCorteAco = ({ user }) => {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans relative overflow-x-hidden">
       
-      {/* --- SIDEBAR LATERAL (MEUS PROJETOS) --- */}
+      {/* --- SIDEBAR LATERAL (MEUS ARQUIVOS) --- */}
       <div className={`fixed inset-y-0 right-0 w-80 bg-white shadow-2xl z-[60] transform transition-transform duration-300 ease-in-out border-l border-slate-200 ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'}`}>
           <div className="p-4 bg-indigo-900 text-white flex justify-between items-center shadow-md">
-              <h2 className="font-bold flex items-center gap-2"><FolderHeart size={20} /> Meus Projetos</h2>
+              <h2 className="font-bold flex items-center gap-2"><FolderHeart size={20} /> Meus Arquivos</h2>
               <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-indigo-700 p-1 rounded"><X size={20}/></button>
           </div>
-          <div className="p-4 overflow-y-auto h-[calc(100vh-64px)] space-y-3 bg-slate-50">
-              {projects.length === 0 ? (
-                  <div className="text-center text-slate-400 py-10">Nenhum projeto salvo.</div>
-              ) : (
-                  projects.map(proj => (
-                      <div 
-                        key={proj.id} 
-                        // Ao clicar, abre o modal de edição ao invés de carregar direto
-                        onClick={() => setEditingProject(proj)}
-                        className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:shadow-md hover:border-indigo-300 cursor-pointer transition-all group relative"
-                      >
-                          <div className="font-bold text-slate-800 text-sm mb-1 pr-6 truncate">{proj.name}</div>
-                          <div className="text-xs text-slate-500 flex items-center gap-1">
-                              <Calendar size={12}/> {proj.createdAt?.toDate().toLocaleDateString()} - {proj.items.length} peças
-                          </div>
-                          <div className="absolute top-3 right-3 text-indigo-300 group-hover:text-indigo-600 transition-colors">
-                            <Edit3 size={14} />
-                          </div>
+          <div className="p-4 overflow-y-auto h-[calc(100vh-64px)] space-y-6 bg-slate-50">
+              
+              {/* SEÇÃO 1: PROJETOS (INPUT) */}
+              <div>
+                  <h3 className="text-xs font-bold text-slate-500 uppercase mb-2 pl-1 flex items-center gap-2">
+                      <FileText size={14}/> Projetos (Demanda)
+                  </h3>
+                  {projects.length === 0 ? (
+                      <div className="text-center text-slate-400 py-4 text-sm border border-dashed rounded bg-white">Nenhum projeto salvo.</div>
+                  ) : (
+                      <div className="space-y-2">
+                          {projects.map(proj => (
+                              <div 
+                                key={proj.id} 
+                                onClick={() => setEditingProject(proj)}
+                                className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:shadow-md hover:border-indigo-300 cursor-pointer transition-all group relative"
+                              >
+                                  <div className="font-bold text-slate-800 text-sm mb-1 pr-6 truncate">{proj.name}</div>
+                                  <div className="text-xs text-slate-500 flex items-center gap-1">
+                                      <Calendar size={12}/> {proj.createdAt?.toDate().toLocaleDateString()} - {proj.items.length} peças
+                                  </div>
+                                  <div className="absolute top-3 right-3 text-indigo-300 group-hover:text-indigo-600 transition-colors">
+                                    <Edit3 size={14} />
+                                  </div>
+                              </div>
+                          ))}
                       </div>
-                  ))
-              )}
+                  )}
+              </div>
+
+              {/* SEÇÃO 2: PLANOS DE CORTE (OUTPUT) */}
+              <div>
+                  <h3 className="text-xs font-bold text-slate-500 uppercase mb-2 pl-1 flex items-center gap-2 pt-4 border-t border-slate-200">
+                      <Download size={14}/> Planos Calculados
+                  </h3>
+                  {savedPlans.length === 0 ? (
+                      <div className="text-center text-slate-400 py-4 text-sm border border-dashed rounded bg-white">Nenhum plano salvo.</div>
+                  ) : (
+                      <div className="space-y-2">
+                          {savedPlans.map(plan => (
+                              <div 
+                                key={plan.id} 
+                                onClick={() => handleLoadCutPlan(plan)}
+                                className="bg-green-50 p-3 rounded-lg border border-green-200 shadow-sm hover:shadow-md hover:border-green-400 cursor-pointer transition-all group relative"
+                              >
+                                  <div className="font-bold text-green-900 text-sm mb-1 pr-6 truncate">{plan.name}</div>
+                                  <div className="text-xs text-green-700/70 flex items-center gap-1">
+                                      <CheckSquare size={12}/> {plan.createdAt?.toDate().toLocaleDateString()}
+                                  </div>
+                                  {/* Botão de Excluir Plano */}
+                                  <button 
+                                      onClick={(e) => handleDeleteCutPlan(plan.id, e)}
+                                      className="absolute top-3 right-3 text-red-300 hover:text-red-600 hover:bg-red-50 p-1 rounded transition-colors"
+                                      title="Excluir Plano"
+                                  >
+                                      <Trash2 size={14} />
+                                  </button>
+                              </div>
+                          ))}
+                      </div>
+                  )}
+              </div>
+
           </div>
       </div>
 
       {/* OVERLAY DA SIDEBAR */}
       {isSidebarOpen && <div className="fixed inset-0 bg-black/20 z-[50] backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}></div>}
 
-      {/* --- MODAL DE EDIÇÃO DO PROJETO (NOVO) --- */}
+      {/* --- MODAL DE EDIÇÃO DO PROJETO (INPUT) --- */}
       {editingProject && (
           <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center backdrop-blur-sm p-4">
               <div className="bg-white rounded-lg shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -527,7 +609,7 @@ const OtimizadorCorteAco = ({ user }) => {
                 onClick={() => setIsSidebarOpen(true)}
                 className="flex items-center gap-1 text-sm bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-md transition-colors shadow-sm border border-indigo-600"
             >
-                <FolderHeart size={16} /> <span className="hidden sm:inline">Meus Projetos</span>
+                <FolderHeart size={16} /> <span className="hidden sm:inline">Meus Arquivos</span>
             </button>
 
             <div className="hidden md:flex items-center gap-2 text-sm text-slate-400 border-l border-slate-700 pl-3">
@@ -755,10 +837,21 @@ const OtimizadorCorteAco = ({ user }) => {
             <div className="space-y-8 animate-fade-in pb-8">
                 <div className="flex justify-between items-center bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex-wrap gap-4">
                     <div><h2 className="text-xl font-bold text-indigo-900">Plano Gerado</h2></div>
-                    <div className="flex gap-2 items-center">
-                        <button onClick={generatePDF} className="bg-white text-indigo-700 border border-indigo-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm"><Printer size={16} /> PDF</button>
-                        <button onClick={consolidateLeftovers} className="bg-indigo-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm"><Save size={16} /> Salvar Sobras</button>
-                        <button onClick={clearResults} className="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm"><Eraser size={16} /> Limpar</button>
+                    <div className="flex gap-2 items-center flex-wrap">
+                        {/* Botão Salvar Plano (NOVO) */}
+                        <button onClick={handleSaveCutPlan} className="bg-indigo-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-700 transition-colors">
+                            <Save size={16} /> Salvar Plano
+                        </button>
+                        
+                        <button onClick={generatePDF} className="bg-white text-indigo-700 border border-indigo-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-50">
+                            <Printer size={16} /> PDF
+                        </button>
+                        <button onClick={consolidateLeftovers} className="bg-green-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-green-700">
+                            <FolderDown size={16} /> Salvar Sobras
+                        </button>
+                        <button onClick={clearResults} className="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-red-100">
+                            <Eraser size={16} /> Limpar
+                        </button>
                     </div>
                 </div>
                 {renderBitolaTabs(activeResultsBitola, setActiveResultsBitola, results.map(r => parseFloat(r.bitola)).sort((a,b)=>a-b))}
