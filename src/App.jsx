@@ -176,32 +176,75 @@ const OtimizadorCorteAco = () => {
   };
 
   const parseTextToItems = (text, fileName) => {
+    // 1. LIMPEZA AVANÇADA
+    // Remove "CA50", "CA60", "CA-50" etc para evitar que o parser confunda "50" com quantidade
     let cleanText = text
+        .replace(/CA\s*-?\s*\d+/gi, '') 
         .replace(/\$/g, '')
         .replace(/\\times/g, 'x')
         .replace(/\\/g, '')
         .replace(/CONSUMIDOR FINAL\/CF/g, '')
-        .replace(/Código: \d+/g, '');
+        .replace(/Código: \d+/g, '')
+        // Opcional: Remover cabeçalhos comuns que podem atrapalhar
+        .replace(/Bitola|Posição|Aço|Qtde|Compr|Peso|Trechos|Código/gi, '');
 
     const extracted = [];
     const lines = cleanText.split('\n');
+
+    // 2. DEFINIÇÃO DE PADRÕES (REGEX)
+    const patterns = [
+        // Padrão A: Bitola ... Quantidade ... Comprimento (Padrão mais comum)
+        // Ex: 10,00 ... 31x2 ... 1200
+        // Explicação: 
+        // (\d+[.,]\d+) -> Bitola (float)
+        // .*? -> qualquer coisa no meio
+        // \b(\d+\s*[xX*]\s*\d+|\d{1,5})\b -> Qtd (número ou mult ex: 10x2), com bordas (\b)
+        // .*? -> qualquer coisa
+        // (\d{3,4}) -> Comprimento (3 ou 4 digitos)
+        /(\d+[.,]\d+).*?\b(\d+\s*[xX*]\s*\d+|\d{1,5})\b.*?(\d{3,4})/,
+
+        // Padrão B: Bitola ... Comprimento ... Quantidade (Ordem invertida)
+        // Ex: 10,00 ... 1200 ... 31x2
+        /(\d+[.,]\d+).*?(\d{3,4}).*?\b(\d+\s*[xX*]\s*\d+|\d{1,5})\b/
+    ];
 
     lines.forEach(line => {
         const l = line.trim();
         if (l.length < 3) return;
 
-        const lineMatch = l.match(/(\d+[.,]\d+).*?(\d+\s*[x*]\s*\d+|\d{1,3}).*?(\d{3,4})/);
+        let match = null;
+        let foundPattern = -1;
+
+        // Tenta encontrar algum dos padrões na linha
+        for (let i = 0; i < patterns.length; i++) {
+            match = l.match(patterns[i]);
+            if (match) {
+                foundPattern = i;
+                break;
+            }
+        }
         
-        if (lineMatch) {
-            const val1 = parseFloat(lineMatch[1].replace(',', '.'));
-            const val2Str = lineMatch[2];
-            const val3 = parseFloat(lineMatch[3]);
+        if (match) {
+            let val1, val2Str, val3;
+
+            if (foundPattern === 0) {
+                // Padrão A: Bitola(1), Qtd(2), Comp(3)
+                val1 = parseFloat(match[1].replace(',', '.'));
+                val2Str = match[2];
+                val3 = parseFloat(match[3]);
+            } else {
+                // Padrão B: Bitola(1), Comp(2), Qtd(3)
+                val1 = parseFloat(match[1].replace(',', '.'));
+                val3 = parseFloat(match[2]);
+                val2Str = match[3];
+            }
             
             const isBitolaValid = enabledBitolas.includes(val1); 
             const isCompr = val3 > 20 && val3 <= 1200;
             
             if (isBitolaValid && isCompr) {
                  let qtd = 1;
+                 // Suporta 'x', 'X' ou '*'
                  if (val2Str.toLowerCase().includes('x') || val2Str.includes('*')) {
                     const parts = val2Str.toLowerCase().replace('x', '*').split('*');
                     qtd = parseInt(parts[0]) * parseInt(parts[1]);
@@ -223,14 +266,18 @@ const OtimizadorCorteAco = () => {
         }
     });
 
+    // 3. FALLBACK (Se a leitura linha a linha falhar muito, tenta ler o texto corrido)
     if (extracted.length === 0) {
-        const fallbackRegex = /(\d+[.,]\d+)(?:[^0-9]{1,100}?)(\d+\s*[x*]\s*\d+|\d+)(?:[^0-9]{1,100}?)(\d{2,4})/g;
+        // Regex global que ignora quebras de linha e busca o padrão no texto "normalizado"
+        const fallbackRegex = /(\d+[.,]\d+)(?:[^0-9]{1,100}?)(\d+\s*[xX*]\s*\d+|\d+)(?:[^0-9]{1,100}?)(\d{2,4})/g;
         let match;
         const normalizedText = cleanText.replace(/,/g, '.').replace(/\s+/g, ' ');
+        
         while ((match = fallbackRegex.exec(normalizedText)) !== null) {
             const b = parseFloat(match[1]);
             const qStr = match[2];
             const c = parseFloat(match[3]);
+            
             if (enabledBitolas.includes(b) && c > 30 && c <= 1200) {
                  let qtd = 1;
                  if (qStr.toLowerCase().includes('x') || qStr.includes('*')) {
