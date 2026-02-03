@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Trash2, Plus, Download, Clipboard, ArrowRight, Save, RefreshCw, FileText, Settings, Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, FolderUp, X, Eraser } from 'lucide-react';
+// Importamos a lógica externa aqui:
+import { extractTextFromPDF, parseTextToItems, BITOLAS_COMERCIAIS, generateId } from './pdfProcessor';
 
 const OtimizadorCorteAco = () => {
   // --- Estados ---
@@ -23,7 +25,6 @@ const OtimizadorCorteAco = () => {
   const [newManualItemData, setNewManualItemData] = useState({ bitola: 10.0, length: 100, qty: 1 });
 
   // Filtro de quais bitolas aceitar na importação e visualização
-  const BITOLAS_COMERCIAIS = [4.2, 5.0, 6.3, 8.0, 10.0, 12.5, 16.0, 20.0, 25.0, 32.0, 40.0];
   const [enabledBitolas, setEnabledBitolas] = useState([...BITOLAS_COMERCIAIS]);
 
   const fileInputRef = useRef(null);
@@ -32,11 +33,6 @@ const OtimizadorCorteAco = () => {
   // --- Constantes ---
   const BARRA_PADRAO = 1200; // 12 metros
   const PERDA_CORTE = 0; // Perda por corte
-
-  // --- Função Helper para Gerar IDs Únicos ---
-  const generateId = () => {
-    return Date.now().toString(36) + '-' + Math.random().toString(36).substr(2, 9);
-  };
 
   // --- Carregar Scripts Externos ---
   useEffect(() => {
@@ -106,34 +102,6 @@ const OtimizadorCorteAco = () => {
   // --- DERIVED STATE: Items Filtrados ---
   const filteredItems = items.filter(item => enabledBitolas.includes(item.bitola));
 
-  // --- Lógica de Leitura de PDF (Entrada) ---
-  const extractTextFromPDF = async (file) => {
-    if (!window.pdfjsLib) {
-        alert("Aguarde um momento, carregando biblioteca de PDF...");
-        return "";
-    }
-
-    const arrayBuffer = await file.arrayBuffer();
-    const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-    let fullText = "";
-
-    for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        let lastY = -1;
-        let pageText = "";
-        for (const item of textContent.items) {
-            if (lastY !== -1 && Math.abs(item.transform[5] - lastY) > 5) {
-                pageText += "\n";
-            }
-            pageText += item.str + " ";
-            lastY = item.transform[5];
-        }
-        fullText += pageText + "\n--- PAGE BREAK ---\n";
-    }
-    return fullText;
-  };
-
   const handleFileUpload = async (event) => {
     const files = Array.from(event.target.files);
     if (files.length === 0) return;
@@ -153,11 +121,13 @@ const OtimizadorCorteAco = () => {
         try {
             let text = "";
             if (file.type === "application/pdf") {
+                // Chama função do arquivo externo
                 text = await extractTextFromPDF(file);
             } else {
                 text = await file.text();
             }
 
+            // Chama função do arquivo externo
             const itemsFromThisFile = parseTextToItems(text, file.name);
             allExtractedItems = [...allExtractedItems, ...itemsFromThisFile];
             
@@ -180,109 +150,6 @@ const OtimizadorCorteAco = () => {
   const removeFile = (fileName) => {
       setUploadedFiles(prev => prev.filter(f => f.name !== fileName));
       setItems(prev => prev.filter(i => i.origin !== fileName));
-  };
-
-  const parseTextToItems = (text, fileName) => {
-    let cleanText = text
-        .replace(/CA\s*-?\s*\d+/gi, '') 
-        .replace(/\$/g, '')
-        .replace(/\\times/g, 'x')
-        .replace(/\\/g, '')
-        .replace(/CONSUMIDOR FINAL\/CF/g, '')
-        .replace(/Código: \d+/g, '')
-        .replace(/L\d+=.*?(\n|$)/g, '') 
-        .replace(/Peso.*?(\n|$)/g, '')  
-        .replace(/Bitola \(mm\)|Aço|Trechos|Página \d+ de \d+/gi, '');
-
-    const normalizedText = cleanText.replace(/,/g, '.').replace(/\s+/g, ' ');
-    const extracted = [];
-
-    const bitolaRegex = /(\d+[.,]\d+)/g;
-    let match;
-
-    while ((match = bitolaRegex.exec(normalizedText)) !== null) {
-        const bitolaVal = parseFloat(match[1]);
-        
-        if (BITOLAS_COMERCIAIS.includes(bitolaVal)) {
-            const startIndex = bitolaRegex.lastIndex;
-            const contextChunk = normalizedText.substring(startIndex, startIndex + 180);
-
-            const qtdeMatch = contextChunk.match(/Qtde\s*[a-zA-Z]*\s*[:.]?\s*(\d+(?:\s*[xX*]\s*\d+)?)/i);
-            const comprMatch = contextChunk.match(/Compr\w*\s*[:.]?\s*(\d{2,4})/i);
-
-            let qtd = 0;
-            let length = 0;
-
-            if (qtdeMatch && comprMatch) {
-                length = parseFloat(comprMatch[1]);
-                const qStr = qtdeMatch[1];
-                if (qStr.toLowerCase().includes('x') || qStr.includes('*')) {
-                    const parts = qStr.toLowerCase().replace('x', '*').split('*');
-                    qtd = parseInt(parts[0]) * parseInt(parts[1]);
-                } else {
-                    qtd = parseInt(qStr);
-                }
-            } 
-            else {
-                const fallbackNums = contextChunk.matchAll(/(\d+(?:\s*[xX*]\s*\d+)?)/g);
-                const candidates = [];
-                for (const m of fallbackNums) {
-                    candidates.push(m[1]);
-                    if (candidates.length >= 2) break;
-                }
-
-                if (candidates.length >= 2) {
-                    const valAStr = candidates[0];
-                    const valBStr = candidates[1];
-                    let valA = 0, valB = 0;
-                    let isAMult = false, isBMult = false;
-
-                    if (valAStr.toLowerCase().includes('x') || valAStr.includes('*')) {
-                        const parts = valAStr.toLowerCase().replace('x', '*').split('*');
-                        valA = parseInt(parts[0]) * parseInt(parts[1]);
-                        isAMult = true;
-                    } else { valA = parseFloat(valAStr); }
-
-                    if (valBStr.toLowerCase().includes('x') || valBStr.includes('*')) {
-                        const parts = valBStr.toLowerCase().replace('x', '*').split('*');
-                        valB = parseInt(parts[0]) * parseInt(parts[1]);
-                        isBMult = true;
-                    } else { valB = parseFloat(valBStr); }
-
-                    if (isAMult && !isBMult) { qtd = valA; length = valB; }
-                    else if (!isAMult && isBMult) { length = valA; qtd = valB; }
-                    else if (valA === 1200 && valB !== 1200) { length = valA; qtd = valB; }
-                    else if (valB === 1200 && valA !== 1200) { qtd = valA; length = valB; }
-                    else {
-                        if (valA > 50 && valB < 30) { length = valA; qtd = valB; }
-                        else if (valB > 50 && valA < 30) { qtd = valA; length = valB; }
-                        else { length = valA; qtd = valB; }
-                    }
-                }
-            }
-
-            if (length > 20 && length <= 1200 && qtd > 0) {
-                 const isDuplicate = extracted.some(i => 
-                    Math.abs(i.bitola - bitolaVal) < 0.01 && 
-                    i.length === length && 
-                    i.qty === qtd
-                 );
-                 
-                 if (!isDuplicate) {
-                     extracted.push({
-                        id: generateId(),
-                        origin: fileName,
-                        bitola: bitolaVal,
-                        qty: qtd,
-                        length: length,
-                        selected: true
-                     });
-                 }
-            }
-        }
-    }
-
-    return extracted;
   };
 
   // --- Manipulação de Itens (Demanda) ---
