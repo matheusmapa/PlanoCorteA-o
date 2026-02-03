@@ -1,3 +1,10 @@
+import * as pdfjsLib from 'pdfjs-dist';
+// Importação especial do Worker para o Vite funcionar na Vercel
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
+
+// Configura o worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+
 // --- CONSTANTES ---
 export const BITOLAS_COMERCIAIS = [4.2, 5.0, 6.3, 8.0, 10.0, 12.5, 16.0, 20.0, 25.0, 32.0, 40.0];
 
@@ -8,33 +15,33 @@ export const generateId = () => {
 
 // --- LEITURA DE PDF ---
 export const extractTextFromPDF = async (file) => {
-  if (!window.pdfjsLib) {
-      alert("Aguarde um momento, carregando biblioteca de PDF...");
-      return "";
-  }
+  try {
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = "";
 
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-  let fullText = "";
-
-  for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const textContent = await page.getTextContent();
-      let lastY = -1;
-      let pageText = "";
-      for (const item of textContent.items) {
-          if (lastY !== -1 && Math.abs(item.transform[5] - lastY) > 5) {
-              pageText += "\n";
+      for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const textContent = await page.getTextContent();
+          let lastY = -1;
+          let pageText = "";
+          for (const item of textContent.items) {
+              if (lastY !== -1 && Math.abs(item.transform[5] - lastY) > 5) {
+                  pageText += "\n";
+              }
+              pageText += item.str + " ";
+              lastY = item.transform[5];
           }
-          pageText += item.str + " ";
-          lastY = item.transform[5];
+          fullText += pageText + "\n--- PAGE BREAK ---\n";
       }
-      fullText += pageText + "\n--- PAGE BREAK ---\n";
+      return fullText;
+  } catch (error) {
+      console.error("Erro ao ler PDF:", error);
+      throw new Error("Falha ao processar o arquivo PDF.");
   }
-  return fullText;
 };
 
-// --- PARSER (RegEx e Lógica de Extração) ---
+// --- PARSER (Mantido igual, só copiei sua lógica original) ---
 export const parseTextToItems = (text, fileName) => {
   let cleanText = text
       .replace(/CA\s*-?\s*\d+/gi, '') 
@@ -49,7 +56,6 @@ export const parseTextToItems = (text, fileName) => {
 
   const normalizedText = cleanText.replace(/,/g, '.').replace(/\s+/g, ' ');
   const extracted = [];
-
   const bitolaRegex = /(\d+[.,]\d+)/g;
   let match;
 
@@ -120,7 +126,6 @@ export const parseTextToItems = (text, fileName) => {
                   i.length === length && 
                   i.qty === qtd
                );
-               
                if (!isDuplicate) {
                    extracted.push({
                       id: generateId(),
@@ -134,6 +139,5 @@ export const parseTextToItems = (text, fileName) => {
           }
       }
   }
-
   return extracted;
 };
