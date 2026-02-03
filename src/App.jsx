@@ -1,69 +1,74 @@
-// src/App.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { Trash2, Plus, Download, Clipboard, ArrowRight, Save, RefreshCw, FileText, Settings, Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, FolderUp, X, Eraser, LogOut, User } from 'lucide-react';
+import { Trash2, Plus, Download, Clipboard, Save, RefreshCw, FileText, Settings, Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, FolderUp, X, Eraser, LogOut, User, Menu, FolderHeart, Calendar } from 'lucide-react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
+import { collection, addDoc, deleteDoc, doc, onSnapshot, query, orderBy, serverTimestamp } from 'firebase/firestore';
 
-// Importamos a lógica externa
+// Lógica externa
 import { extractTextFromPDF, parseTextToItems, BITOLAS_COMERCIAIS, generateId } from './pdfProcessor';
 import { calculateCutPlan } from './cutOptimizer';
-import { auth } from './firebase'; // Importa a config do firebase
-import Login from './Login'; // Importa a tela de Login
+import { auth, db } from './firebase'; // Importa auth e db
+import Login from './Login';
 
-// --- COMPONENTE PRINCIPAL DO OTIMIZADOR ---
+// --- COMPONENTE PRINCIPAL ---
 const OtimizadorCorteAco = ({ user }) => {
-  // --- Estados ---
-  const [activeTab, setActiveTab] = useState('input'); // input, inventory, results
+  // --- Estados Principais ---
+  const [activeTab, setActiveTab] = useState('input');
   const [items, setItems] = useState([]); // DEMANDA
   const [inventory, setInventory] = useState([]); // ESTOQUE
   const [results, setResults] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [uploadedFiles, setUploadedFiles] = useState([]);
+
+  // --- Estados do Banco de Dados / Projetos ---
+  const [projects, setProjects] = useState([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   
-  // Estados de Navegação por Abas de Bitola
+  // --- Estados de Interface ---
   const [activeInventoryBitola, setActiveInventoryBitola] = useState('todas');
   const [activeResultsBitola, setActiveResultsBitola] = useState('todas');
-
-  // Estados do Modal de Adicionar Estoque
   const [showAddStockModal, setShowAddStockModal] = useState(false);
   const [newStockItemData, setNewStockItemData] = useState({ bitola: 10.0, length: 100, qty: 1 });
-
-  // Estados do Modal de Adicionar Item Manual (Input)
   const [showManualInputModal, setShowManualInputModal] = useState(false);
   const [newManualItemData, setNewManualItemData] = useState({ bitola: 10.0, length: 100, qty: 1 });
-
-  // Filtro de quais bitolas aceitar na importação e visualização
   const [enabledBitolas, setEnabledBitolas] = useState([...BITOLAS_COMERCIAIS]);
 
   const fileInputRef = useRef(null);
-  const inventoryInputRef = useRef(null); // Ref para importação de estoque
+  const inventoryInputRef = useRef(null);
 
-  // --- Constantes ---
-  const BARRA_PADRAO = 1200; // 12 metros
-  const PERDA_CORTE = 0; // Perda por corte
+  const BARRA_PADRAO = 1200;
+  const PERDA_CORTE = 0;
 
-  // --- Carregar Scripts Externos ---
+  // --- Inicialização e Banco de Dados ---
   useEffect(() => {
-    // PDF.js
-    const scriptPdf = document.createElement('script');
-    scriptPdf.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
-    scriptPdf.async = true;
-    scriptPdf.onload = () => {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    // 1. Carregar Scripts Externos (PDF.js, etc)
+    const loadScripts = () => {
+        const scriptPdf = document.createElement('script');
+        scriptPdf.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
+        scriptPdf.async = true;
+        scriptPdf.onload = () => {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        };
+        document.body.appendChild(scriptPdf);
+
+        const scriptJsPdf = document.createElement('script');
+        scriptJsPdf.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+        scriptJsPdf.async = true;
+        document.body.appendChild(scriptJsPdf);
+        
+        const scriptAutoTable = document.createElement('script');
+        scriptAutoTable.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js';
+        scriptAutoTable.async = true;
+        document.body.appendChild(scriptAutoTable);
+
+        return () => {
+            document.body.removeChild(scriptPdf);
+            document.body.removeChild(scriptJsPdf);
+            document.body.removeChild(scriptAutoTable);
+        };
     };
-    document.body.appendChild(scriptPdf);
+    const cleanupScripts = loadScripts();
 
-    // jsPDF
-    const scriptJsPdf = document.createElement('script');
-    scriptJsPdf.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
-    scriptJsPdf.async = true;
-    document.body.appendChild(scriptJsPdf);
-    
-    // AutoTable
-    const scriptAutoTable = document.createElement('script');
-    scriptAutoTable.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js';
-    scriptAutoTable.async = true;
-    document.body.appendChild(scriptAutoTable);
-
+    // 2. Carregar Estoque Local
     const savedInventory = localStorage.getItem('estoquePontas');
     if (savedInventory) {
       try {
@@ -72,17 +77,81 @@ const OtimizadorCorteAco = ({ user }) => {
             parsedInv = parsedInv.map(i => i.qty ? i : { ...i, qty: 1 });
             setInventory(parsedInv);
         }
-      } catch (e) {
-        console.error("Erro ao carregar estoque salvo", e);
-      }
+      } catch (e) { console.error(e); }
     }
 
-    return () => {
-      document.body.removeChild(scriptPdf);
-      document.body.removeChild(scriptJsPdf);
-      document.body.removeChild(scriptAutoTable);
+    // 3. Ouvinte do Firestore (Projetos Salvos)
+    if (user) {
+        const q = query(collection(db, 'users', user.uid, 'projects'), orderBy('createdAt', 'desc'));
+        const unsubscribe = onSnapshot(q, (snapshot) => {
+            const projectsData = snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data()
+            }));
+            setProjects(projectsData);
+        });
+        return () => {
+            cleanupScripts();
+            unsubscribe();
+        }
     }
-  }, []);
+
+    return cleanupScripts;
+  }, [user]);
+
+  // --- Funções de Banco de Dados (Projetos) ---
+  
+  const handleSaveProject = async () => {
+      if (items.length === 0) return alert("A lista de corte está vazia. Nada para salvar.");
+      
+      const projectName = window.prompt("Nome do Projeto (ex: Obra Residencial Silva):");
+      if (!projectName) return;
+
+      try {
+          await addDoc(collection(db, 'users', user.uid, 'projects'), {
+              name: projectName,
+              items: items, // Salva o array de itens atual
+              createdAt: serverTimestamp()
+          });
+          alert("Projeto salvo com sucesso! Confira na aba lateral.");
+          setIsSidebarOpen(true);
+      } catch (error) {
+          console.error("Erro ao salvar:", error);
+          alert("Erro ao salvar projeto.");
+      }
+  };
+
+  const handleLoadProject = (project) => {
+      if (!project.items || project.items.length === 0) return;
+
+      if(window.confirm(`Deseja ADICIONAR os itens do projeto "${project.name}" à sua lista atual?\n(Isso não apaga o que você já tem na tela)`)) {
+          // AQUI ESTÁ O PULO DO GATO:
+          // Mapeamos os itens recarregados gerando NOVOS IDs para evitar conflito de chave no React
+          // E somamos à lista existente.
+          const newItems = project.items.map(item => ({
+              ...item,
+              id: generateId(),
+              origin: `Importado: ${project.name}` // Marca a origem para saber de onde veio
+          }));
+
+          setItems(prev => [...prev, ...newItems]);
+          setIsSidebarOpen(false); // Fecha sidebar após carregar
+          alert(`${newItems.length} itens adicionados à lista!`);
+      }
+  };
+
+  const handleDeleteProject = async (projectId, e) => {
+      e.stopPropagation(); // Evita disparar o click do card
+      if(window.confirm("Tem certeza que deseja excluir este projeto salvo?")) {
+          try {
+              await deleteDoc(doc(db, 'users', user.uid, 'projects', projectId));
+          } catch (error) {
+              alert("Erro ao excluir.");
+          }
+      }
+  };
+
+  // --- Funções do App (Mantidas) ---
 
   const saveInventoryToLocal = (newInv) => {
     setInventory([...newInv]);
@@ -95,24 +164,16 @@ const OtimizadorCorteAco = ({ user }) => {
       }
   };
 
-  // --- Lógica de Filtro de Bitolas ---
   const toggleBitola = (bitola) => {
       setEnabledBitolas(prev => 
-          prev.includes(bitola) 
-            ? prev.filter(b => b !== bitola)
-            : [...prev, bitola].sort((a,b) => a-b)
+          prev.includes(bitola) ? prev.filter(b => b !== bitola) : [...prev, bitola].sort((a,b) => a-b)
       );
   };
 
   const toggleAllBitolas = () => {
-      if (enabledBitolas.length === BITOLAS_COMERCIAIS.length) {
-          setEnabledBitolas([]);
-      } else {
-          setEnabledBitolas([...BITOLAS_COMERCIAIS]);
-      }
+      setEnabledBitolas(enabledBitolas.length === BITOLAS_COMERCIAIS.length ? [] : [...BITOLAS_COMERCIAIS]);
   };
 
-  // --- DERIVED STATE: Items Filtrados ---
   const filteredItems = items.filter(item => enabledBitolas.includes(item.bitola));
 
   const handleFileUpload = async (event) => {
@@ -163,7 +224,6 @@ const OtimizadorCorteAco = ({ user }) => {
       setItems(prev => prev.filter(i => i.origin !== fileName));
   };
 
-  // --- Manipulação de Itens (Demanda) ---
   const openManualInputModal = () => {
     setNewManualItemData({ bitola: 10.0, length: 100, qty: 1 });
     setShowManualInputModal(true);
@@ -171,10 +231,7 @@ const OtimizadorCorteAco = ({ user }) => {
 
   const confirmAddManualItem = () => {
       const { bitola, length, qty } = newManualItemData;
-      if (length <= 0 || qty <= 0) {
-          alert("Comprimento e Quantidade devem ser maiores que zero.");
-          return;
-      }
+      if (length <= 0 || qty <= 0) return alert("Valores inválidos");
       const newItem = {
           id: generateId(),
           origin: 'Manual',
@@ -202,7 +259,6 @@ const OtimizadorCorteAco = ({ user }) => {
       }
   };
 
-  // --- Manipulação de Estoque (Pontas) ---
   const openAddStockModal = () => {
       setNewStockItemData({ bitola: 10.0, length: 100, qty: 1 });
       setShowAddStockModal(true);
@@ -210,17 +266,8 @@ const OtimizadorCorteAco = ({ user }) => {
 
   const confirmAddStockItem = () => {
       const { bitola, length, qty } = newStockItemData;
-      if (length <= 0 || qty <= 0) {
-          alert("Comprimento e Quantidade devem ser maiores que zero.");
-          return;
-      }
-      const newPonta = { 
-          id: generateId(), 
-          bitola: parseFloat(bitola), 
-          length: parseFloat(length), 
-          qty: parseInt(qty), 
-          source: 'estoque_manual' 
-      };
+      if (length <= 0 || qty <= 0) return alert("Valores inválidos");
+      const newPonta = { id: generateId(), bitola: parseFloat(bitola), length: parseFloat(length), qty: parseInt(qty), source: 'estoque_manual' };
       saveInventoryToLocal([...inventory, newPonta]);
       setShowAddStockModal(false);
   };
@@ -235,96 +282,16 @@ const OtimizadorCorteAco = ({ user }) => {
   };
 
   const clearInventory = () => {
-      if(window.confirm("Tem certeza que deseja APAGAR TODO o estoque de pontas?\nIsso não pode ser desfeito.")) {
+      if(window.confirm("Tem certeza que deseja APAGAR TODO o estoque de pontas?")) {
           saveInventoryToLocal([]);
-          setInventory([]); // Força atualização visual
+          setInventory([]);
       }
   }
 
-  // --- BACKUP E RESTAURAÇÃO DE ESTOQUE ---
-  const exportInventoryJSON = () => {
-      const dataStr = JSON.stringify(inventory, null, 2);
-      const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-      const exportFileDefaultName = `Backup_Estoque_${new Date().toLocaleDateString().replace(/\//g, '-')}.json`;
-      const linkElement = document.createElement('a');
-      linkElement.setAttribute('href', dataUri);
-      linkElement.setAttribute('download', exportFileDefaultName);
-      linkElement.click();
-  };
-
-  const handleRestoreClick = () => {
-      if (inventoryInputRef.current) {
-          inventoryInputRef.current.click();
-      }
-  };
-
-  const importInventoryJSON = (event) => {
-      const file = event.target.files[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = (e) => {
-          try {
-              const importedData = JSON.parse(e.target.result);
-              if (Array.isArray(importedData)) {
-                  const validData = importedData.map(item => ({
-                      id: item.id || generateId(),
-                      bitola: parseFloat(item.bitola) || 0,
-                      length: parseFloat(item.length) || 0,
-                      qty: parseInt(item.qty) || 1,
-                      source: item.source || 'importado'
-                  })).filter(i => i.bitola > 0 && i.length > 0);
-
-                  if(validData.length > 0) {
-                      if(window.confirm(`Encontrados ${validData.length} itens no arquivo.\nDeseja substituir seu estoque atual por estes itens?`)){
-                          saveInventoryToLocal(validData);
-                          alert("Estoque restaurado com sucesso!");
-                      }
-                  } else {
-                      alert("O arquivo não contém itens válidos.");
-                  }
-              } else {
-                  alert("Arquivo inválido. Formato incorreto.");
-              }
-          } catch (err) {
-              alert("Erro ao ler arquivo. Verifique se é um JSON válido.");
-          }
-          if(inventoryInputRef.current) inventoryInputRef.current.value = '';
-      };
-      reader.readAsText(file);
-  };
-  
-  const exportInventoryPDF = () => {
-    if (!window.jspdf) return alert("Biblioteca PDF carregando...");
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    doc.text("Relatório de Estoque de Pontas", 14, 20);
-    doc.setFontSize(10);
-    doc.text(`Gerado em: ${new Date().toLocaleString()}`, 14, 26);
-    const tableData = inventory
-      .sort((a,b) => a.bitola - b.bitola || b.length - a.length)
-      .map(item => [
-          `${item.bitola.toFixed(1)} mm`,
-          item.qty,
-          `${item.length} cm`,
-          `${(item.length * item.qty / 100).toFixed(2)} m`,
-          item.source || '-'
-    ]);
-    doc.autoTable({
-        head: [['Bitola', 'Qtd', 'Comprimento Unit.', 'Total Linear', 'Origem']],
-        body: tableData,
-        startY: 30,
-    });
-    doc.save(`Relatorio_Estoque_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`);
-  };
-
-  // --- OTIMIZAÇÃO (REFATORADO) ---
+  // --- OTIMIZAÇÃO ---
   const runOptimization = () => {
     const itemsToCut = filteredItems.filter(item => item.selected);
-    if (itemsToCut.length === 0) {
-        alert("Nenhum item válido para cortar (verifique se a lista está vazia ou se as bitolas estão desmarcadas).");
-        return;
-    }
+    if (itemsToCut.length === 0) return alert("Nenhum item válido para cortar.");
     setIsProcessing(true);
     setTimeout(() => {
         try {
@@ -333,76 +300,45 @@ const OtimizadorCorteAco = ({ user }) => {
             setActiveTab('results');
             setActiveResultsBitola('todas');
         } catch (error) {
-            console.error("Erro no cálculo:", error);
-            alert("Ocorreu um erro inesperado ao calcular o plano de corte.");
+            console.error(error);
+            alert("Erro ao calcular.");
         } finally {
             setIsProcessing(false);
         }
     }, 100);
   };
 
+  // --- PDF ---
   const generatePDF = () => {
-    if (!window.jspdf || !results) return alert("Biblioteca PDF ainda não carregada ou sem resultados.");
+    if (!window.jspdf || !results) return alert("Biblioteca PDF não carregada.");
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
     let yPos = 20;
-    
-    doc.setFontSize(18);
-    doc.text("Plano de Corte - Otimizador de Aço", 105, yPos, { align: 'center' });
-    yPos += 15;
-    
-    doc.setFontSize(10);
-    doc.text(`Data: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`, 105, yPos, { align: 'center' });
-    yPos += 15;
+    doc.setFontSize(18); doc.text("Plano de Corte", 105, yPos, { align: 'center' }); yPos += 15;
+    doc.setFontSize(10); doc.text(`Data: ${new Date().toLocaleDateString()}`, 105, yPos, { align: 'center' }); yPos += 15;
 
     results.forEach(group => {
         if (yPos > 270) { doc.addPage(); yPos = 20; }
-        doc.setFillColor(240, 240, 240);
-        doc.rect(10, yPos - 5, 190, 8, 'F');
-        doc.setFontSize(12);
-        doc.setFont("helvetica", "bold");
-        doc.text(`Bitola: ${parseFloat(group.bitola).toFixed(1)} mm`, 15, yPos);
-        yPos += 10;
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(10);
+        doc.setFillColor(240, 240, 240); doc.rect(10, yPos - 5, 190, 8, 'F');
+        doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.text(`Bitola: ${parseFloat(group.bitola).toFixed(1)} mm`, 15, yPos); yPos += 10;
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10);
         group.bars.forEach(bar => {
              if (yPos > 260) { doc.addPage(); yPos = 20; }
              const typeText = bar.type === 'nova' ? "BARRA NOVA (1200cm)" : `PONTA ESTOQUE (${bar.originalLength}cm)`;
-             const wasteText = `Sobra: ${bar.remaining.toFixed(0)}cm`;
-             doc.setFont("helvetica", "bold");
-             doc.text(`${bar.count}x  ${typeText}`, 15, yPos);
-             doc.setFont("helvetica", "normal");
-             doc.text(wasteText, 150, yPos, { align: 'right' });
-             yPos += 3;
-             const scale = 180 / bar.originalLength;
-             let currentX = 15;
-             const barHeight = 8;
+             doc.setFont("helvetica", "bold"); doc.text(`${bar.count}x  ${typeText}`, 15, yPos);
+             doc.setFont("helvetica", "normal"); doc.text(`Sobra: ${bar.remaining.toFixed(0)}cm`, 150, yPos, { align: 'right' }); yPos += 3;
+             const scale = 180 / bar.originalLength; let currentX = 15;
              bar.cuts.forEach(cut => {
                  const cutWidth = cut * scale;
-                 doc.setFillColor(59, 130, 246);
-                 doc.rect(currentX, yPos, cutWidth, barHeight, 'F');
-                 doc.rect(currentX, yPos, cutWidth, barHeight, 'S');
-                 if (cutWidth > 8) {
-                    doc.setTextColor(255, 255, 255);
-                    doc.setFontSize(8);
-                    const textX = currentX + (cutWidth / 2);
-                    doc.text(`${cut}`, textX, yPos + 5.5, { align: 'center' });
-                 }
+                 doc.setFillColor(59, 130, 246); doc.rect(currentX, yPos, cutWidth, 8, 'F'); doc.rect(currentX, yPos, cutWidth, 8, 'S');
+                 if (cutWidth > 8) { doc.setTextColor(255, 255, 255); doc.setFontSize(8); doc.text(`${cut}`, currentX + (cutWidth / 2), yPos + 5.5, { align: 'center' }); }
                  currentX += cutWidth;
              });
              if (bar.remaining > 0) {
                  const remainingWidth = bar.remaining * scale;
-                 doc.setFillColor(220, 220, 220);
-                 doc.rect(currentX, yPos, remainingWidth, barHeight, 'F');
-                 doc.rect(currentX, yPos, remainingWidth, barHeight, 'S');
-                 doc.setTextColor(100, 100, 100);
-                 doc.setFontSize(8);
-                 if (remainingWidth > 15) {
-                    doc.text("Sobra", currentX + (remainingWidth/2), yPos + 5.5, { align: 'center' });
-                 }
+                 doc.setFillColor(220, 220, 220); doc.rect(currentX, yPos, remainingWidth, 8, 'F'); doc.rect(currentX, yPos, remainingWidth, 8, 'S');
              }
-             doc.setTextColor(0, 0, 0);
-             yPos += 15;
+             doc.setTextColor(0, 0, 0); yPos += 15;
         });
         yPos += 5;
     });
@@ -412,298 +348,207 @@ const OtimizadorCorteAco = ({ user }) => {
   const consolidateLeftovers = () => {
     if (!results) return;
     const usedCounts = {};
-
     results.forEach(group => {
         group.bars.forEach(barGroup => {
             if (barGroup.type === 'estoque') {
-                barGroup.ids.forEach(id => {
-                    usedCounts[id] = (usedCounts[id] || 0) + 1;
-                });
+                barGroup.ids.forEach(id => { usedCounts[id] = (usedCounts[id] || 0) + 1; });
             }
         });
     });
-
     let updatedInventory = inventory.map(item => {
-        if (usedCounts[item.id]) {
-            const newQty = item.qty - usedCounts[item.id];
-            return { ...item, qty: Math.max(0, newQty) };
-        }
+        if (usedCounts[item.id]) { const newQty = item.qty - usedCounts[item.id]; return { ...item, qty: Math.max(0, newQty) }; }
         return item;
     }).filter(item => item.qty > 0);
-
     results.forEach(group => {
         group.bars.forEach(barGroup => {
             if (barGroup.remaining > 50) { 
-                const bitola = parseFloat(group.bitola);
-                const length = parseFloat(barGroup.remaining.toFixed(1));
-                const qtyToAdd = barGroup.count; 
-
-                const existingIndex = updatedInventory.findIndex(
-                    i => Math.abs(i.bitola - bitola) < 0.01 && Math.abs(i.length - length) < 0.1
-                );
-
-                if (existingIndex !== -1) {
-                    updatedInventory[existingIndex].qty += qtyToAdd;
-                } else {
-                    updatedInventory.push({
-                        id: generateId(),
-                        bitola: bitola,
-                        length: length,
-                        qty: qtyToAdd,
-                        source: 'sobra_corte'
-                    });
-                }
+                const bitola = parseFloat(group.bitola); const length = parseFloat(barGroup.remaining.toFixed(1)); const qtyToAdd = barGroup.count; 
+                const existingIndex = updatedInventory.findIndex(i => Math.abs(i.bitola - bitola) < 0.01 && Math.abs(i.length - length) < 0.1);
+                if (existingIndex !== -1) { updatedInventory[existingIndex].qty += qtyToAdd; } 
+                else { updatedInventory.push({ id: generateId(), bitola, length, qty: qtyToAdd, source: 'sobra_corte' }); }
             }
         });
     });
-
     saveInventoryToLocal(updatedInventory);
-    alert(`Estoque atualizado! As sobras foram somadas e as barras usadas removidas.`);
+    alert(`Estoque atualizado!`);
     setActiveTab('inventory');
   };
 
-  const clearResults = () => {
-    if(window.confirm("Deseja descartar o plano de corte atual?")) {
-        setResults(null);
-        setActiveTab('input');
-    }
-  };
+  const clearResults = () => { if(window.confirm("Descartar plano?")) { setResults(null); setActiveTab('input'); } };
 
+  // --- Helpers UI ---
   const renderBitolaTabs = (current, setFunction, availableBitolas) => {
     const tabs = ['todas', ...availableBitolas];
     return (
         <div className="flex overflow-x-auto gap-1 border-b border-slate-200 mb-4 pb-0 no-scrollbar items-end h-10 px-1">
-            {tabs.map(tab => {
-                const isActive = current === tab;
-                let label = tab === 'todas' ? 'Todas' : `${parseFloat(tab).toFixed(1)} mm`;
-                return (
-                    <button
-                        key={tab}
-                        onClick={() => setFunction(tab)}
-                        className={`
-                            px-4 py-2 text-sm font-medium rounded-t-lg transition-all whitespace-nowrap border-t border-x relative
-                            ${isActive 
-                                ? 'bg-white border-indigo-200 text-indigo-700 z-10 top-[1px] shadow-[0_-2px_3px_rgba(0,0,0,0.02)] border-b-white h-10' 
-                                : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-slate-700 h-9 mb-0.5'}
-                        `}
-                    >
-                        {label}
-                    </button>
-                )
-            })}
+            {tabs.map(tab => (
+                <button key={tab} onClick={() => setFunction(tab)} className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-all whitespace-nowrap border-t border-x relative ${current === tab ? 'bg-white border-indigo-200 text-indigo-700 z-10 top-[1px] shadow-[0_-2px_3px_rgba(0,0,0,0.02)] border-b-white h-10' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'}`}>
+                    {tab === 'todas' ? 'Todas' : `${parseFloat(tab).toFixed(1)} mm`}
+                </button>
+            ))}
         </div>
     );
   };
 
-  const getResultsTabClass = () => {
-      if (activeTab === 'results') return 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm';
-      if (results) return 'bg-green-50 text-green-700 hover:bg-green-100 border-b-2 border-transparent hover:border-green-300 transition-all';
-      return 'text-slate-400 cursor-not-allowed';
-  };
-
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans">
-      <header className="bg-slate-900 text-white p-4 shadow-lg sticky top-0 z-50">
+    <div className="min-h-screen bg-slate-50 text-slate-800 font-sans relative overflow-x-hidden">
+      
+      {/* --- SIDEBAR LATERAL (MEUS PROJETOS) --- */}
+      <div className={`fixed inset-y-0 right-0 w-80 bg-white shadow-2xl z-[60] transform transition-transform duration-300 ease-in-out border-l border-slate-200 ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+          <div className="p-4 bg-indigo-900 text-white flex justify-between items-center shadow-md">
+              <h2 className="font-bold flex items-center gap-2"><FolderHeart size={20} /> Meus Projetos</h2>
+              <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-indigo-700 p-1 rounded"><X size={20}/></button>
+          </div>
+          <div className="p-4 overflow-y-auto h-[calc(100vh-64px)] space-y-3 bg-slate-50">
+              {projects.length === 0 ? (
+                  <div className="text-center text-slate-400 py-10">Nenhum projeto salvo.</div>
+              ) : (
+                  projects.map(proj => (
+                      <div 
+                        key={proj.id} 
+                        onClick={() => handleLoadProject(proj)}
+                        className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:shadow-md hover:border-indigo-300 cursor-pointer transition-all group relative"
+                      >
+                          <div className="font-bold text-slate-800 text-sm mb-1 pr-6">{proj.name}</div>
+                          <div className="text-xs text-slate-500 flex items-center gap-1">
+                              <Calendar size={12}/> {proj.createdAt?.toDate().toLocaleDateString()} - {proj.items.length} itens
+                          </div>
+                          <button 
+                            onClick={(e) => handleDeleteProject(proj.id, e)}
+                            className="absolute top-2 right-2 text-slate-300 hover:text-red-500 p-1 rounded-full hover:bg-red-50 transition-colors"
+                            title="Excluir projeto"
+                          >
+                              <XCircle size={16} />
+                          </button>
+                      </div>
+                  ))
+              )}
+          </div>
+      </div>
+
+      {/* OVERLAY DA SIDEBAR */}
+      {isSidebarOpen && <div className="fixed inset-0 bg-black/20 z-[50] backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}></div>}
+
+      <header className="bg-slate-900 text-white p-4 shadow-lg sticky top-0 z-40">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2">
             <Settings className="w-6 h-6 text-yellow-500" />
-            <h1 className="text-xl font-bold tracking-tight">Otimizador Corte & Dobra</h1>
+            <h1 className="text-xl font-bold tracking-tight hidden sm:block">Otimizador Corte & Dobra</h1>
+            <h1 className="text-xl font-bold tracking-tight sm:hidden">Otimizador</h1>
           </div>
-          <div className="flex items-center gap-4">
-            <div className="hidden sm:flex items-center gap-2 text-sm text-slate-300">
-                <User size={14} />
-                <span>{user.email}</span>
-            </div>
+          <div className="flex items-center gap-3">
             <button 
-                onClick={handleLogout}
-                className="flex items-center gap-1 text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-full transition-colors"
+                onClick={() => setIsSidebarOpen(true)}
+                className="flex items-center gap-1 text-sm bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-md transition-colors shadow-sm border border-indigo-600"
             >
-                <LogOut size={12} /> Sair
+                <FolderHeart size={16} /> <span className="hidden sm:inline">Meus Projetos</span>
             </button>
+
+            <div className="hidden md:flex items-center gap-2 text-sm text-slate-400 border-l border-slate-700 pl-3">
+                <User size={14} />
+                <span className="max-w-[150px] truncate">{user.email}</span>
+            </div>
+            <button onClick={handleLogout} className="text-slate-400 hover:text-red-400 p-1"><LogOut size={18} /></button>
           </div>
         </div>
       </header>
 
       <main className="max-w-6xl mx-auto p-4">
         
-        <div className="flex gap-4 mb-6 border-b border-slate-200 pb-2 overflow-x-auto">
-          <button 
-            onClick={() => setActiveTab('input')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'input' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}
-          >
-            <FileText size={18} /> Inserir PDF(s)
+        {/* NAVEGAÇÃO DE ABAS */}
+        <div className="flex gap-2 sm:gap-4 mb-6 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar">
+          <button onClick={() => setActiveTab('input')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'input' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
+            <FileText size={18} /> Demanda
           </button>
-          <button 
-            onClick={() => setActiveTab('inventory')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'inventory' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}
-          >
-            <Clipboard size={18} /> Estoque Pontas ({inventory.reduce((acc, i) => acc + i.qty, 0)})
+          <button onClick={() => setActiveTab('inventory')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'inventory' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
+            <Clipboard size={18} /> Estoque ({inventory.reduce((acc, i) => acc + i.qty, 0)})
           </button>
-          <button 
-            onClick={() => setActiveTab('results')}
-            disabled={!results}
-            className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${getResultsTabClass()}`}
-          >
-            <Download size={18} /> Resultado {results ? '(Pronto)' : ''}
+          <button onClick={() => setActiveTab('results')} disabled={!results} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'results' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : results ? 'bg-green-50 text-green-700' : 'text-slate-400 cursor-not-allowed'}`}>
+            <Download size={18} /> Resultado
           </button>
         </div>
 
-        {/* --- TAB: INPUT --- */}
+        {/* --- TAB: INPUT (DEMANDA) --- */}
         {activeTab === 'input' && (
-          <div className="space-y-6">
+          <div className="space-y-6 animate-fade-in">
+            {/* Filtro de Bitolas */}
             <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
                 <div className="flex justify-between items-center mb-2">
-                    <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Filtro Visual: Exibir bitolas</h3>
-                    <button onClick={toggleAllBitolas} className="text-xs text-blue-600 hover:underline">
-                        {enabledBitolas.length === BITOLAS_COMERCIAIS.length ? "Desmarcar todas" : "Marcar todas"}
-                    </button>
+                    <h3 className="text-xs font-bold text-slate-500 uppercase">Filtrar visualização</h3>
+                    <button onClick={toggleAllBitolas} className="text-xs text-blue-600 hover:underline">{enabledBitolas.length === BITOLAS_COMERCIAIS.length ? "Desmarcar todas" : "Marcar todas"}</button>
                 </div>
                 <div className="flex flex-wrap gap-2">
-                    {BITOLAS_COMERCIAIS.map(bitola => {
-                        const isSelected = enabledBitolas.includes(bitola);
-                        return (
-                            <button 
-                                key={bitola}
-                                onClick={() => toggleBitola(bitola)}
-                                className={`px-3 py-1 text-sm rounded-full border transition-all flex items-center gap-1 ${
-                                    isSelected 
-                                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
-                                    : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
-                                }`}
-                            >
-                                {isSelected ? <CheckSquare size={14} /> : <Square size={14} />}
-                                {bitola.toFixed(1)}mm
-                            </button>
-                        )
-                    })}
+                    {BITOLAS_COMERCIAIS.map(bitola => (
+                        <button key={bitola} onClick={() => toggleBitola(bitola)} className={`px-2 py-1 text-xs sm:text-sm rounded border transition-all flex items-center gap-1 ${enabledBitolas.includes(bitola) ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
+                            {enabledBitolas.includes(bitola) ? <CheckSquare size={12} /> : <Square size={12} />} {bitola.toFixed(1)}
+                        </button>
+                    ))}
                 </div>
             </div>
 
+            {/* Upload Area */}
             <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
-              <h2 className="text-lg font-semibold mb-3 text-slate-700">1. Carregar Arquivos (PDF ou Texto)</h2>
-              <div className="border-2 border-dashed border-blue-200 rounded-lg p-8 text-center hover:bg-blue-50 transition cursor-pointer relative group">
-                  <input 
-                    ref={fileInputRef}
-                    type="file" 
-                    multiple 
-                    accept=".pdf,.txt,.csv" 
-                    onChange={handleFileUpload}
-                    className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                  />
+              <h2 className="text-lg font-semibold mb-3 text-slate-700">Importar Arquivos</h2>
+              <div className="border-2 border-dashed border-blue-200 rounded-lg p-6 sm:p-10 text-center hover:bg-blue-50 transition cursor-pointer relative group">
+                  <input ref={fileInputRef} type="file" multiple accept=".pdf,.txt,.csv" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
                   <div className="flex flex-col items-center gap-3 text-blue-600">
-                      {isProcessing ? (
-                          <RefreshCw className="animate-spin w-10 h-10" />
-                      ) : (
-                          <Upload className="w-10 h-10 group-hover:scale-110 transition-transform" />
-                      )}
-                      <span className="font-bold">
-                          {isProcessing ? "Lendo arquivos..." : "Clique ou Arraste seus PDFs aqui"}
-                      </span>
+                      {isProcessing ? <RefreshCw className="animate-spin w-10 h-10" /> : <Upload className="w-10 h-10 group-hover:scale-110 transition-transform" />}
+                      <span className="font-bold text-sm sm:text-base">{isProcessing ? "Lendo arquivos..." : "Clique ou Arraste seus PDFs aqui"}</span>
                   </div>
               </div>
+              {/* Arquivos Carregados */}
               {uploadedFiles.length > 0 && (
-                  <div className="mt-4 space-y-2">
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
-                          {uploadedFiles.map((file, idx) => (
-                              <div key={idx} className={`flex items-center gap-2 p-2 rounded border text-sm group ${file.status === 'erro' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'}`}>
-                                  <File size={14} />
-                                  <span className="truncate flex-1 font-medium">{file.name}</span>
-                                  {file.status === 'ok' && <span className="text-xs font-bold bg-green-200 px-1 rounded text-green-800">LIDO</span>}
-                                  {file.status === 'erro' && <span className="text-xs font-bold bg-red-200 px-1 rounded text-red-800">ERRO</span>}
-                                  <button onClick={() => removeFile(file.name)} className="ml-2 text-slate-400 hover:text-red-600 p-1 rounded hover:bg-red-100 transition-colors"><XCircle size={16} /></button>
-                              </div>
-                          ))}
-                      </div>
+                  <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                      {uploadedFiles.map((file, idx) => (
+                          <div key={idx} className={`flex items-center gap-2 p-2 rounded border text-xs sm:text-sm ${file.status === 'erro' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'}`}>
+                              <File size={14} /> <span className="truncate flex-1">{file.name}</span>
+                              <button onClick={() => removeFile(file.name)} className="text-slate-400 hover:text-red-600"><XCircle size={16} /></button>
+                          </div>
+                      ))}
                   </div>
               )}
             </div>
 
+            {/* Lista de Itens */}
             <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
               <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
-                <div>
-                    <h2 className="text-lg font-semibold text-slate-700 flex items-center gap-2">
-                        2. Lista de Peças a Cortar (Demanda)
-                        <div className="group relative">
-                            <Info size={16} className="text-slate-400 cursor-help"/>
-                            <div className="absolute left-0 bottom-full mb-2 hidden group-hover:block w-64 bg-slate-800 text-white text-xs p-2 rounded shadow-lg z-10">
-                                Esta é a lista de peças que você PRECISA ter cortadas no final.
-                            </div>
-                        </div>
-                    </h2>
-                </div>
+                <h2 className="text-lg font-semibold text-slate-700 flex items-center gap-2">
+                    Lista de Corte <span className="text-sm font-normal text-slate-400">({items.length} itens)</span>
+                </h2>
                 <div className="flex gap-2">
-                    <button onClick={clearItems} className="text-red-500 text-sm hover:underline px-2">Limpar Lista</button>
-                    <button onClick={openManualInputModal} className="flex items-center gap-1 bg-green-600 text-white px-3 py-1.5 rounded-md hover:bg-green-700 text-sm">
-                        <Plus size={16} /> Adicionar Manual
+                    <button onClick={handleSaveProject} className="flex items-center gap-1 bg-indigo-50 text-indigo-600 border border-indigo-200 px-3 py-1.5 rounded-md hover:bg-indigo-100 text-sm font-medium transition-colors">
+                        <Save size={16} /> <span className="hidden sm:inline">Salvar Projeto</span>
+                    </button>
+                    <button onClick={clearItems} className="text-red-500 text-sm hover:underline px-2">Limpar</button>
+                    <button onClick={openManualInputModal} className="flex items-center gap-1 bg-green-600 text-white px-3 py-1.5 rounded-md hover:bg-green-700 text-sm shadow-sm transition-transform active:scale-95">
+                        <Plus size={16} /> Manual
                     </button>
                 </div>
               </div>
 
               {items.length === 0 ? (
                 <div className="text-center py-12 text-slate-400 bg-slate-50 rounded-md border border-dashed border-slate-300">
-                  <p className="font-medium">Lista de corte vazia.</p>
-                  <p className="text-sm mt-1">Carregue um PDF acima ou adicione itens manualmente.</p>
+                  <p className="font-medium">Lista vazia.</p>
+                  <p className="text-sm mt-1">Importe um PDF, adicione manualmente ou carregue um projeto salvo.</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm text-left">
                     <thead className="text-xs text-slate-500 uppercase bg-slate-100">
-                      <tr>
-                        <th className="px-4 py-3">Bitola (mm)</th>
-                        <th className="px-4 py-3">Qtde</th>
-                        <th className="px-4 py-3">Comp. (cm)</th>
-                        <th className="px-4 py-3">Origem</th>
-                        <th className="px-4 py-3 text-right">Ação</th>
-                      </tr>
+                      <tr><th className="px-4 py-3">Bitola</th><th className="px-4 py-3">Qtd</th><th className="px-4 py-3">Comp. (cm)</th><th className="px-4 py-3">Origem</th><th className="px-4 py-3 text-right">Ação</th></tr>
                     </thead>
                     <tbody>
-                      {/* MUDANÇA: Renderiza apenas items filtrados */}
-                      {filteredItems.length === 0 && items.length > 0 && (
-                          <tr>
-                              <td colSpan="5" className="text-center py-4 text-slate-500 italic">
-                                  Existem itens carregados, mas estão ocultos pelo filtro de bitolas acima.
-                              </td>
-                          </tr>
-                      )}
-                      {filteredItems.map((item, idx) => (
+                      {filteredItems.map((item) => (
                         <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50">
                           <td className="px-4 py-2">
-                            <select 
-                                value={item.bitola} 
-                                onChange={(e) => updateItem(item.id, 'bitola', parseFloat(e.target.value))}
-                                className="w-24 p-1.5 border rounded bg-white"
-                            >
-                                {BITOLAS_COMERCIAIS.map(b => (
-                                    <option key={b} value={b}>{b.toFixed(1)}</option>
-                                ))}
+                            <select value={item.bitola} onChange={(e) => updateItem(item.id, 'bitola', parseFloat(e.target.value))} className="w-20 p-1 border rounded bg-white text-xs sm:text-sm">
+                                {BITOLAS_COMERCIAIS.map(b => <option key={b} value={b}>{b}</option>)}
                             </select>
                           </td>
-                          <td className="px-4 py-2">
-                            <input 
-                              type="number" 
-                              value={item.qty} 
-                              onChange={(e) => updateItem(item.id, 'qty', parseInt(e.target.value))}
-                              className="w-20 p-1.5 border rounded font-bold text-blue-800"
-                              min="1"
-                            />
-                          </td>
-                          <td className="px-4 py-2">
-                            <input 
-                              type="number" 
-                              value={item.length} 
-                              onChange={(e) => updateItem(item.id, 'length', parseFloat(e.target.value))}
-                              className="w-24 p-1.5 border rounded"
-                              min="1"
-                            />
-                          </td>
-                           <td className="px-4 py-2 text-xs text-slate-500 truncate max-w-[100px]" title={item.origin}>
-                            {item.origin}
-                          </td>
-                          <td className="px-4 py-2 text-right">
-                            <button onClick={() => removeItem(item.id)} className="text-red-400 hover:text-red-600">
-                              <Trash2 size={16} />
-                            </button>
-                          </td>
+                          <td className="px-4 py-2"><input type="number" value={item.qty} onChange={(e) => updateItem(item.id, 'qty', parseInt(e.target.value))} className="w-16 p-1 border rounded font-bold text-blue-800 text-center" /></td>
+                          <td className="px-4 py-2"><input type="number" value={item.length} onChange={(e) => updateItem(item.id, 'length', parseFloat(e.target.value))} className="w-20 p-1 border rounded text-center" /></td>
+                          <td className="px-4 py-2 text-xs text-slate-400 max-w-[100px] truncate" title={item.origin}>{item.origin}</td>
+                          <td className="px-4 py-2 text-right"><button onClick={() => removeItem(item.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button></td>
                         </tr>
                       ))}
                     </tbody>
@@ -713,13 +558,9 @@ const OtimizadorCorteAco = ({ user }) => {
             </div>
 
             <div className="flex justify-end pb-8">
-                <button 
-                    onClick={runOptimization}
-                    disabled={filteredItems.length === 0 || isProcessing}
-                    className={`px-8 py-3 rounded-md shadow-md font-bold flex items-center gap-2 transition-all ${filteredItems.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:scale-105'}`}
-                >
+                <button onClick={runOptimization} disabled={filteredItems.length === 0 || isProcessing} className={`w-full sm:w-auto px-8 py-3 rounded-md shadow-md font-bold flex items-center justify-center gap-2 transition-all ${filteredItems.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:scale-105'}`}>
                     {isProcessing ? <RefreshCw className="animate-spin" size={20} /> : <RefreshCw size={20} />}
-                    {isProcessing ? "CALCULANDO..." : "CALCULAR PLANO DE CORTE"}
+                    {isProcessing ? "CALCULANDO..." : "CALCULAR OTIMIZAÇÃO"}
                 </button>
             </div>
           </div>
@@ -727,249 +568,73 @@ const OtimizadorCorteAco = ({ user }) => {
 
         {/* --- TAB: INVENTORY --- */}
         {activeTab === 'inventory' && (
-           <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 space-y-4">
+           <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 space-y-4 animate-fade-in">
               <div className="flex justify-between items-center flex-wrap gap-4">
-                  <div>
-                    <h2 className="text-lg font-semibold text-slate-700">Estoque de Pontas (Sobras)</h2>
-                    <p className="text-sm text-slate-500">Sobras agrupadas por tamanho. Total de peças: <span className="font-bold text-slate-800">{inventory.reduce((acc, i) => acc + i.qty, 0)}</span></p>
-                  </div>
+                  <h2 className="text-lg font-semibold text-slate-700">Estoque de Pontas</h2>
                   <div className="flex gap-2 flex-wrap">
-                    {/* Input file escondido para restauração */}
-                    <input 
-                        ref={inventoryInputRef}
-                        type="file" 
-                        accept=".json"
-                        onChange={importInventoryJSON}
-                        className="hidden" 
-                    />
-
-                    {/* BACKUP BUTTONS */}
-                    <div className="flex items-center gap-2 border-r pr-2 mr-2">
-                        <button onClick={exportInventoryJSON} className="flex items-center gap-1 bg-slate-100 text-slate-700 border border-slate-300 px-3 py-1.5 rounded-md hover:bg-slate-200 text-xs font-semibold" title="Baixar arquivo de dados para backup">
-                            <FolderDown size={14} /> Backup (JSON)
-                        </button>
-                        <button onClick={handleRestoreClick} className="flex items-center gap-1 bg-slate-100 text-slate-700 border border-slate-300 px-3 py-1.5 rounded-md hover:bg-slate-200 text-xs font-semibold" title="Restaurar dados de um arquivo">
-                            <FolderUp size={14} /> Restaurar
-                        </button>
-                    </div>
-                    
-                    <button onClick={exportInventoryPDF} className="flex items-center gap-1 bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-md hover:bg-indigo-100 text-xs font-semibold">
-                        <Printer size={14} /> Relatório PDF
-                    </button>
                     <button onClick={clearInventory} className="text-red-500 text-sm hover:underline px-2">Zerar</button>
-                    <button onClick={openAddStockModal} className="flex items-center gap-1 bg-green-600 text-white px-3 py-1.5 rounded-md hover:bg-green-700 text-sm">
-                        <Plus size={16} /> Adicionar
-                    </button>
+                    <button onClick={openAddStockModal} className="flex items-center gap-1 bg-green-600 text-white px-3 py-1.5 rounded-md hover:bg-green-700 text-sm"><Plus size={16} /> Adicionar</button>
                   </div>
               </div>
-              
-              {/* --- ABAS DE BITOLA (INVENTORY) --- */}
               {renderBitolaTabs(activeInventoryBitola, setActiveInventoryBitola, BITOLAS_COMERCIAIS)}
-
               <div className="overflow-x-auto max-h-[500px] overflow-y-auto border border-slate-200 rounded-b-lg">
                 <table className="w-full text-sm text-left">
                     <thead className="text-xs text-slate-500 uppercase bg-yellow-50 sticky top-0">
-                        <tr>
-                            <th className="px-4 py-3">Bitola (mm)</th>
-                            <th className="px-4 py-3">Qtd</th>
-                            <th className="px-4 py-3">Comp. (cm)</th>
-                            <th className="px-4 py-3">Origem</th>
-                            <th className="px-4 py-3 text-right">Ação</th>
-                        </tr>
+                        <tr><th className="px-4 py-3">Bitola</th><th className="px-4 py-3">Qtd</th><th className="px-4 py-3">Comp.</th><th className="px-4 py-3">Origem</th><th className="px-4 py-3 text-right">Ação</th></tr>
                     </thead>
                     <tbody>
-                        {(() => {
-                            // Filtro por aba
-                            const displayedInventory = activeInventoryBitola === 'todas'
-                                ? inventory
-                                : inventory.filter(i => Math.abs(i.bitola - parseFloat(activeInventoryBitola)) < 0.01);
-                            
-                            if (displayedInventory.length === 0) {
-                                return (
-                                    <tr><td colSpan="5" className="text-center py-8 text-slate-400">
-                                        {activeInventoryBitola === 'todas' 
-                                            ? "Nenhuma ponta no estoque." 
-                                            : `Nenhuma ponta de ${parseFloat(activeInventoryBitola).toFixed(1)}mm no estoque.`}
-                                    </td></tr>
-                                );
-                            }
-
-                            return displayedInventory.sort((a,b) => b.bitola - a.bitola).map(item => (
-                                <tr key={item.id} className="border-b border-slate-100 hover:bg-yellow-50">
-                                    <td className="px-4 py-2">
-                                        <select 
-                                            value={item.bitola} 
-                                            onChange={(e) => updateInventoryItem(item.id, 'bitola', parseFloat(e.target.value))}
-                                            className="w-24 p-1 border rounded bg-transparent"
-                                        >
-                                            {BITOLAS_COMERCIAIS.map(b => (
-                                                <option key={b} value={b}>{b.toFixed(1)}</option>
-                                            ))}
-                                        </select>
-                                    </td>
-                                    <td className="px-4 py-2">
-                                        <input 
-                                            type="number" 
-                                            value={item.qty} 
-                                            onChange={(e) => updateInventoryItem(item.id, 'qty', parseInt(e.target.value))}
-                                            className="w-20 p-1 border rounded bg-transparent font-bold text-slate-700"
-                                            min="1"
-                                        />
-                                    </td>
-                                    <td className="px-4 py-2">
-                                        <input 
-                                            type="number" 
-                                            value={item.length} 
-                                            onChange={(e) => updateInventoryItem(item.id, 'length', parseFloat(e.target.value))}
-                                            className="w-24 p-1 border rounded bg-transparent font-semibold"
-                                        />
-                                    </td>
-                                    <td className="px-4 py-2 text-xs text-slate-400 uppercase">
-                                        {item.source || 'Manual'}
-                                    </td>
-                                    <td className="px-4 py-2 text-right">
-                                        <button onClick={() => removeInventoryItem(item.id)} className="text-red-400 hover:text-red-600">
-                                            <Trash2 size={16} />
-                                        </button>
-                                    </td>
-                                </tr>
-                            ))
-                        })()}
+                        {(activeInventoryBitola === 'todas' ? inventory : inventory.filter(i => Math.abs(i.bitola - parseFloat(activeInventoryBitola)) < 0.01))
+                            .sort((a,b) => b.bitola - a.bitola).map(item => (
+                            <tr key={item.id} className="border-b border-slate-100 hover:bg-yellow-50">
+                                <td className="px-4 py-2">{item.bitola.toFixed(1)} mm</td>
+                                <td className="px-4 py-2"><input type="number" value={item.qty} onChange={(e) => updateInventoryItem(item.id, 'qty', parseInt(e.target.value))} className="w-16 p-1 border rounded bg-transparent font-bold text-slate-700 text-center" /></td>
+                                <td className="px-4 py-2">{item.length} cm</td>
+                                <td className="px-4 py-2 text-xs text-slate-400 uppercase">{item.source || 'Manual'}</td>
+                                <td className="px-4 py-2 text-right"><button onClick={() => removeInventoryItem(item.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button></td>
+                            </tr>
+                        ))}
                     </tbody>
                 </table>
               </div>
            </div>
         )}
 
-        {/* --- MODAL DE ADICIONAR ITEM AO ESTOQUE --- */}
-        {showAddStockModal && (
-            <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm animate-in fade-in">
-                <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
+        {/* --- MODAIS (ADICIONAR ITEM MANUAL / ESTOQUE) --- */}
+        {(showManualInputModal || showAddStockModal) && (
+            <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm px-4">
+                <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm animate-in fade-in zoom-in-95 duration-200">
                     <div className="flex justify-between items-center mb-4 border-b pb-2">
-                        <h3 className="text-lg font-bold text-slate-800">Adicionar Ponta ao Estoque</h3>
-                        <button onClick={() => setShowAddStockModal(false)} className="text-slate-400 hover:text-slate-600">
-                            <X size={20} />
-                        </button>
+                        <h3 className="text-lg font-bold text-slate-800">{showManualInputModal ? "Adicionar Peça" : "Adicionar ao Estoque"}</h3>
+                        <button onClick={() => {setShowManualInputModal(false); setShowAddStockModal(false);}}><X size={20} className="text-slate-400" /></button>
                     </div>
-                    
                     <div className="space-y-4">
                         <div>
-                            <label className="block text-sm font-medium text-slate-600 mb-1">Bitola (mm)</label>
-                            <select 
-                                value={newStockItemData.bitola}
-                                onChange={(e) => setNewStockItemData({...newStockItemData, bitola: e.target.value})}
-                                className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                            >
-                                {BITOLAS_COMERCIAIS.map(b => (
-                                    <option key={b} value={b}>{b.toFixed(1)} mm</option>
-                                ))}
-                            </select>
+                            <label className="block text-sm font-medium text-slate-600 mb-1">Bitola</label>
+                            <select value={showManualInputModal ? newManualItemData.bitola : newStockItemData.bitola} onChange={(e) => {
+                                const val = e.target.value;
+                                showManualInputModal ? setNewManualItemData({...newManualItemData, bitola: val}) : setNewStockItemData({...newStockItemData, bitola: val});
+                            }} className="w-full p-2 border rounded">{BITOLAS_COMERCIAIS.map(b => <option key={b} value={b}>{b} mm</option>)}</select>
                         </div>
-                        
                         <div className="grid grid-cols-2 gap-4">
                             <div>
                                 <label className="block text-sm font-medium text-slate-600 mb-1">Comprimento (cm)</label>
-                                <input 
-                                    type="number"
-                                    value={newStockItemData.length}
-                                    onChange={(e) => setNewStockItemData({...newStockItemData, length: e.target.value})}
-                                    className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                                    min="1"
-                                />
+                                <input type="number" value={showManualInputModal ? newManualItemData.length : newStockItemData.length} onChange={(e) => {
+                                    const val = e.target.value;
+                                    showManualInputModal ? setNewManualItemData({...newManualItemData, length: val}) : setNewStockItemData({...newStockItemData, length: val});
+                                }} className="w-full p-2 border rounded" />
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-slate-600 mb-1">Quantidade</label>
-                                <input 
-                                    type="number"
-                                    value={newStockItemData.qty}
-                                    onChange={(e) => setNewStockItemData({...newStockItemData, qty: e.target.value})}
-                                    className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                                    min="1"
-                                />
+                                <input type="number" value={showManualInputModal ? newManualItemData.qty : newStockItemData.qty} onChange={(e) => {
+                                    const val = e.target.value;
+                                    showManualInputModal ? setNewManualItemData({...newManualItemData, qty: val}) : setNewStockItemData({...newStockItemData, qty: val});
+                                }} className="w-full p-2 border rounded" />
                             </div>
                         </div>
                     </div>
-
                     <div className="mt-6 flex justify-end gap-2">
-                        <button 
-                            onClick={() => setShowAddStockModal(false)}
-                            className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded"
-                        >
-                            Cancelar
-                        </button>
-                        <button 
-                            onClick={confirmAddStockItem}
-                            className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 font-medium"
-                        >
-                            Salvar
-                        </button>
-                    </div>
-                </div>
-            </div>
-        )}
-
-        {/* --- MODAL DE ADICIONAR ITEM MANUAL (INPUT) --- */}
-        {showManualInputModal && (
-            <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm animate-in fade-in">
-                <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-md mx-4">
-                    <div className="flex justify-between items-center mb-4 border-b pb-2">
-                        <h3 className="text-lg font-bold text-slate-800">Adicionar Item Manual</h3>
-                        <button onClick={() => setShowManualInputModal(false)} className="text-slate-400 hover:text-slate-600">
-                            <X size={20} />
-                        </button>
-                    </div>
-                    
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-600 mb-1">Bitola (mm)</label>
-                            <select 
-                                value={newManualItemData.bitola}
-                                onChange={(e) => setNewManualItemData({...newManualItemData, bitola: e.target.value})}
-                                className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                            >
-                                {BITOLAS_COMERCIAIS.map(b => (
-                                    <option key={b} value={b}>{b.toFixed(1)} mm</option>
-                                ))}
-                            </select>
-                        </div>
-                        
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-600 mb-1">Comprimento (cm)</label>
-                                <input 
-                                    type="number"
-                                    value={newManualItemData.length}
-                                    onChange={(e) => setNewManualItemData({...newManualItemData, length: e.target.value})}
-                                    className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                                    min="1"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-600 mb-1">Quantidade</label>
-                                <input 
-                                    type="number"
-                                    value={newManualItemData.qty}
-                                    onChange={(e) => setNewManualItemData({...newManualItemData, qty: e.target.value})}
-                                    className="w-full p-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 focus:outline-none"
-                                    min="1"
-                                />
-                            </div>
-                        </div>
-                    </div>
-
-                    <div className="mt-6 flex justify-end gap-2">
-                        <button 
-                            onClick={() => setShowManualInputModal(false)}
-                            className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded"
-                        >
-                            Cancelar
-                        </button>
-                        <button 
-                            onClick={confirmAddManualItem}
-                            className="px-4 py-2 bg-green-600 text-white rounded hover:bg-green-700 font-medium"
-                        >
-                            Adicionar
-                        </button>
+                        <button onClick={() => {setShowManualInputModal(false); setShowAddStockModal(false);}} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded">Cancelar</button>
+                        <button onClick={showManualInputModal ? confirmAddManualItem : confirmAddStockItem} className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 font-medium">Salvar</button>
                     </div>
                 </div>
             </div>
@@ -978,125 +643,47 @@ const OtimizadorCorteAco = ({ user }) => {
         {/* --- TAB: RESULTS --- */}
         {activeTab === 'results' && results && (
             <div className="space-y-8 animate-fade-in pb-8">
-                
                 <div className="flex justify-between items-center bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex-wrap gap-4">
-                    <div>
-                        <h2 className="text-xl font-bold text-indigo-900">Plano de Corte Gerado</h2>
-                        <p className="text-sm text-indigo-700">Barras idênticas foram agrupadas.</p>
-                    </div>
+                    <div><h2 className="text-xl font-bold text-indigo-900">Plano Gerado</h2></div>
                     <div className="flex gap-2 items-center">
-                        <button 
-                            onClick={generatePDF}
-                            className="bg-white text-indigo-700 border border-indigo-200 px-4 py-2 rounded shadow hover:bg-indigo-50 flex items-center gap-2"
-                        >
-                            <Printer size={18} /> Baixar PDF
-                        </button>
-                        <button 
-                            onClick={consolidateLeftovers}
-                            className="bg-indigo-600 text-white px-6 py-2 rounded shadow hover:bg-indigo-700 flex items-center gap-2"
-                        >
-                            <Save size={18} /> Salvar Sobras
-                        </button>
-                        <div className="w-px h-8 bg-indigo-200 mx-2"></div>
-                        <button 
-                            onClick={clearResults}
-                            className="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded shadow hover:bg-red-100 flex items-center gap-2"
-                            title="Descartar este resultado"
-                        >
-                            <Eraser size={18} /> Limpar
-                        </button>
+                        <button onClick={generatePDF} className="bg-white text-indigo-700 border border-indigo-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm"><Printer size={16} /> PDF</button>
+                        <button onClick={consolidateLeftovers} className="bg-indigo-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm"><Save size={16} /> Salvar Sobras</button>
+                        <button onClick={clearResults} className="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm"><Eraser size={16} /> Limpar</button>
                     </div>
                 </div>
-                
-                {/* --- ABAS DE BITOLA (RESULTS) --- */}
-                {(() => {
-                    const resultBitolas = results.map(r => parseFloat(r.bitola)).sort((a,b) => a-b);
-                    return renderBitolaTabs(activeResultsBitola, setActiveResultsBitola, resultBitolas);
-                })()}
-
-                {/* --- CONTEÚDO RESULTS FILTRADO --- */}
-                {(() => {
-                    const displayedResults = activeResultsBitola === 'todas'
-                        ? results
-                        : results.filter(group => Math.abs(parseFloat(group.bitola) - parseFloat(activeResultsBitola)) < 0.01);
-                    
-                    if (displayedResults.length === 0) {
-                         return <div className="text-center text-slate-500 py-12">Nenhum resultado para esta bitola.</div>;
-                    }
-
-                    return displayedResults.map((group, gIdx) => {
-                        const totalBars = group.bars.reduce((acc, b) => acc + b.count, 0);
-                        return (
-                            <div key={gIdx} className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
-                                <div className="bg-slate-100 px-6 py-3 border-b border-slate-200 flex justify-between">
-                                    <h3 className="font-bold text-lg text-slate-800">Bitola: {group.bitola}mm</h3>
-                                    <span className="text-sm text-slate-500">{totalBars} barras necessárias</span>
-                                </div>
-                                <div className="p-6 space-y-6">
-                                    {group.bars.map((bar, bIdx) => (
-                                        <div key={bIdx} className="flex flex-col gap-1 pb-4 border-b border-slate-100 last:border-0 last:pb-0">
-                                            <div className="flex justify-between text-sm text-slate-600 mb-1 items-center">
-                                                <div className="flex items-center gap-3">
-                                                    <span className="bg-slate-800 text-white font-bold px-3 py-1 rounded-full text-xs">
-                                                        {bar.count}x
-                                                    </span>
-                                                    <span className="font-semibold uppercase tracking-wider flex items-center gap-1 text-xs">
-                                                        {bar.type === 'nova' ? (
-                                                            <span className="text-blue-600 bg-blue-100 px-2 py-0.5 rounded border border-blue-200">Barra Nova (12m)</span>
-                                                        ) : (
-                                                            <span className="text-amber-600 bg-amber-100 px-2 py-0.5 rounded border border-amber-200">Ponta Estoque ({bar.originalLength}cm)</span>
-                                                        )}
-                                                    </span>
-                                                </div>
-                                                <span className="font-mono text-xs">Sobra: <span className={bar.remaining > 100 ? "text-green-600 font-bold" : "text-slate-600"}>{bar.remaining.toFixed(1)}cm</span></span>
+                {renderBitolaTabs(activeResultsBitola, setActiveResultsBitola, results.map(r => parseFloat(r.bitola)).sort((a,b)=>a-b))}
+                {(activeResultsBitola === 'todas' ? results : results.filter(g => Math.abs(parseFloat(g.bitola) - parseFloat(activeResultsBitola)) < 0.01)).map((group, gIdx) => (
+                    <div key={gIdx} className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
+                        <div className="bg-slate-100 px-6 py-3 border-b border-slate-200 flex justify-between"><h3 className="font-bold text-lg text-slate-800">{group.bitola}mm</h3><span className="text-sm text-slate-500">{group.bars.reduce((acc,b)=>acc+b.count,0)} barras</span></div>
+                        <div className="p-6 space-y-6">
+                            {group.bars.map((bar, bIdx) => (
+                                <div key={bIdx} className="flex flex-col gap-1 pb-4 border-b border-slate-100 last:border-0 last:pb-0">
+                                    <div className="flex justify-between text-sm text-slate-600 mb-1 items-center">
+                                        <div className="flex items-center gap-3"><span className="bg-slate-800 text-white font-bold px-3 py-1 rounded-full text-xs">{bar.count}x</span><span className="font-semibold uppercase tracking-wider text-xs">{bar.type === 'nova' ? <span className="text-blue-600 bg-blue-100 px-2 py-0.5 rounded">Barra Nova (12m)</span> : <span className="text-amber-600 bg-amber-100 px-2 py-0.5 rounded">Ponta ({bar.originalLength}cm)</span>}</span></div>
+                                        <span className="font-mono text-xs">Sobra: <span className={bar.remaining > 100 ? "text-green-600 font-bold" : "text-slate-600"}>{bar.remaining.toFixed(1)}cm</span></span>
+                                    </div>
+                                    <div className="h-14 w-full bg-slate-200 rounded overflow-hidden flex border border-slate-300 relative">
+                                        {bar.cuts.map((cut, cIdx) => (
+                                            <div key={cIdx} style={{ width: `${(cut / bar.originalLength) * 100}%` }} className="h-full bg-blue-500 border-r border-white flex flex-col items-center justify-center text-white text-xs overflow-hidden group hover:bg-blue-600 transition-colors" title={`Peça: ${cut}cm`}>
+                                                <span className="font-bold">{cut}</span>
                                             </div>
-                                            <div className="h-14 w-full bg-slate-200 rounded overflow-hidden flex border border-slate-300 relative">
-                                                {bar.cuts.map((cut, cIdx) => {
-                                                    const widthPerc = (cut / bar.originalLength) * 100;
-                                                    return (
-                                                        <div 
-                                                            key={cIdx} 
-                                                            style={{ width: `${widthPerc}%` }}
-                                                            className="h-full bg-blue-500 border-r border-white flex flex-col items-center justify-center text-white text-xs overflow-hidden whitespace-nowrap hover:bg-blue-600 transition-colors relative group"
-                                                            title={`Cortar peça de ${cut}cm`}
-                                                        >
-                                                            <span className="font-bold text-sm">{cut}</span>
-                                                            <span className="text-[10px] opacity-75">cm</span>
-                                                        </div>
-                                                    )
-                                                })}
-                                                <div className="flex-1 bg-slate-300 pattern-diagonal-lines flex items-center justify-center">
-                                                    {bar.remaining > 10 && <span className="text-xs text-slate-500 italic font-medium">{bar.remaining.toFixed(0)}cm</span>}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
+                                        ))}
+                                        <div className="flex-1 bg-slate-300 pattern-diagonal-lines"></div>
+                                    </div>
                                 </div>
-                            </div>
-                        );
-                    });
-                })()}
+                            ))}
+                        </div>
+                    </div>
+                ))}
             </div>
         )}
-
       </main>
-      <style>{`
-        .pattern-diagonal-lines {
-            background-image: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(255,255,255,0.5) 5px, rgba(255,255,255,0.5) 10px);
-        }
-        .no-scrollbar::-webkit-scrollbar {
-          display: none;
-        }
-        .no-scrollbar {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
-        }
-      `}</style>
+      <style>{`.pattern-diagonal-lines { background-image: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(255,255,255,0.5) 5px, rgba(255,255,255,0.5) 10px); } .no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
     </div>
   );
 };
 
-// --- WRAPPER PRINCIPAL COM AUTENTICAÇÃO ---
+// --- WRAPPER DE AUTH ---
 const App = () => {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -1109,18 +696,8 @@ const App = () => {
         return () => unsubscribe();
     }, []);
 
-    if (loading) {
-        return (
-            <div className="min-h-screen bg-slate-100 flex items-center justify-center">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
-            </div>
-        );
-    }
-
-    if (!user) {
-        return <Login />;
-    }
-
+    if (loading) return <div className="min-h-screen bg-slate-100 flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div></div>;
+    if (!user) return <Login />;
     return <OtimizadorCorteAco user={user} />;
 };
 
