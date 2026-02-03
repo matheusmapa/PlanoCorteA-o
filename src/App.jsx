@@ -176,127 +176,146 @@ const OtimizadorCorteAco = () => {
   };
 
   const parseTextToItems = (text, fileName) => {
-    // 1. LIMPEZA AVANÇADA
-    // Remove "CA50", "CA60", "CA-50" etc para evitar que o parser confunda "50" com quantidade
+    // 1. LIMPEZA SEGURA (MANTENDO LABELS "Qtde" e "Compr")
     let cleanText = text
-        .replace(/CA\s*-?\s*\d+/gi, '') 
+        .replace(/CA\s*-?\s*\d+/gi, '') // Remove CA50/CA60
         .replace(/\$/g, '')
         .replace(/\\times/g, 'x')
         .replace(/\\/g, '')
         .replace(/CONSUMIDOR FINAL\/CF/g, '')
         .replace(/Código: \d+/g, '')
-        // Opcional: Remover cabeçalhos comuns que podem atrapalhar
-        .replace(/Bitola|Posição|Aço|Qtde|Compr|Peso|Trechos|Código/gi, '');
+        .replace(/L\d+=.*?(\n|$)/g, '') // Remove trechos L1=...
+        .replace(/Peso.*?(\n|$)/g, '')  // Remove Peso
+        // Remove cabeçalhos que não sejam úteis, mas mantém Qtde/Compr
+        .replace(/Bitola \(mm\)|Aço|Trechos|Página \d+ de \d+/gi, '');
 
+    // Normaliza quebras de linha para espaço para busca global
+    const normalizedText = cleanText.replace(/,/g, '.').replace(/\s+/g, ' ');
     const extracted = [];
-    const lines = cleanText.split('\n');
 
-    // 2. DEFINIÇÃO DE PADRÕES (REGEX)
-    const patterns = [
-        // Padrão A: Bitola ... Quantidade ... Comprimento (Padrão mais comum)
-        // Ex: 10,00 ... 31x2 ... 1200
-        // Explicação: 
-        // (\d+[.,]\d+) -> Bitola (float)
-        // .*? -> qualquer coisa no meio
-        // \b(\d+\s*[xX*]\s*\d+|\d{1,5})\b -> Qtd (número ou mult ex: 10x2), com bordas (\b)
-        // .*? -> qualquer coisa
-        // (\d{3,4}) -> Comprimento (3 ou 4 digitos)
-        /(\d+[.,]\d+).*?\b(\d+\s*[xX*]\s*\d+|\d{1,5})\b.*?(\d{3,4})/,
+    // 2. BUSCA POR CONTEXTO (Bitola ... Contexto)
+    // Encontra todas as ocorrências de Bitolas válidas (Ex: 8.00, 12.50)
+    // e captura o texto seguinte para procurar Qtde e Compr dentro dele.
+    const bitolaRegex = /(\d+[.,]\d+)/g;
+    let match;
 
-        // Padrão B: Bitola ... Comprimento ... Quantidade (Ordem invertida)
-        // Ex: 10,00 ... 1200 ... 31x2
-        /(\d+[.,]\d+).*?(\d{3,4}).*?\b(\d+\s*[xX*]\s*\d+|\d{1,5})\b/
-    ];
-
-    lines.forEach(line => {
-        const l = line.trim();
-        if (l.length < 3) return;
-
-        let match = null;
-        let foundPattern = -1;
-
-        // Tenta encontrar algum dos padrões na linha
-        for (let i = 0; i < patterns.length; i++) {
-            match = l.match(patterns[i]);
-            if (match) {
-                foundPattern = i;
-                break;
-            }
-        }
+    while ((match = bitolaRegex.exec(normalizedText)) !== null) {
+        const bitolaVal = parseFloat(match[1]);
         
-        if (match) {
-            let val1, val2Str, val3;
+        // Se for uma bitola válida
+        if (enabledBitolas.includes(bitolaVal)) {
+            // Pega um "chunk" de texto à frente (ex: 150 caracteres)
+            const startIndex = bitolaRegex.lastIndex;
+            const contextChunk = normalizedText.substring(startIndex, startIndex + 180);
 
-            if (foundPattern === 0) {
-                // Padrão A: Bitola(1), Qtd(2), Comp(3)
-                val1 = parseFloat(match[1].replace(',', '.'));
-                val2Str = match[2];
-                val3 = parseFloat(match[3]);
-            } else {
-                // Padrão B: Bitola(1), Comp(2), Qtd(3)
-                val1 = parseFloat(match[1].replace(',', '.'));
-                val3 = parseFloat(match[2]);
-                val2Str = match[3];
-            }
-            
-            const isBitolaValid = enabledBitolas.includes(val1); 
-            const isCompr = val3 > 20 && val3 <= 1200;
-            
-            if (isBitolaValid && isCompr) {
-                 let qtd = 1;
-                 // Suporta 'x', 'X' ou '*'
-                 if (val2Str.toLowerCase().includes('x') || val2Str.includes('*')) {
-                    const parts = val2Str.toLowerCase().replace('x', '*').split('*');
+            // Tenta encontrar Qtde e Compr usando os labels
+            // Ex: Qtde 198  ou  Qtde x Rep 31x2
+            const qtdeMatch = contextChunk.match(/Qtde\s*[a-zA-Z]*\s*[:.]?\s*(\d+(?:\s*[xX*]\s*\d+)?)/i);
+            // Ex: Compr 404
+            const comprMatch = contextChunk.match(/Compr\w*\s*[:.]?\s*(\d{2,4})/i);
+
+            let qtd = 0;
+            let length = 0;
+            let foundByLabel = false;
+
+            // CASO 1: Encontrou pelos LABELS (Mais seguro)
+            if (qtdeMatch && comprMatch) {
+                length = parseFloat(comprMatch[1]);
+                const qStr = qtdeMatch[1];
+                if (qStr.toLowerCase().includes('x') || qStr.includes('*')) {
+                    const parts = qStr.toLowerCase().replace('x', '*').split('*');
                     qtd = parseInt(parts[0]) * parseInt(parts[1]);
-                 } else {
-                    qtd = parseInt(val2Str);
-                 }
+                } else {
+                    qtd = parseInt(qStr);
+                }
+                foundByLabel = true;
+            } 
+            // CASO 2: HEURÍSTICA (Labels falharam ou texto bagunçado)
+            else {
+                // Procura os próximos dois números "soltos"
+                const fallbackNums = contextChunk.matchAll(/(\d+(?:\s*[xX*]\s*\d+)?)/g);
+                const candidates = [];
+                for (const m of fallbackNums) {
+                    // Ignora números muito pequenos que pareçam Posição (ex: 03) se estiverem isolados e longe
+                    // Mas '03' pode estar colado na bitola no texto original.
+                    // Vamos pegar os 2 primeiros candidatos numéricos encontrados
+                    candidates.push(m[1]);
+                    if (candidates.length >= 2) break;
+                }
 
-                 if (qtd > 0) {
+                if (candidates.length >= 2) {
+                    const valAStr = candidates[0];
+                    const valBStr = candidates[1];
+                    
+                    let valA = 0, valB = 0;
+                    let isAMult = false, isBMult = false;
+
+                    // Analisa A
+                    if (valAStr.toLowerCase().includes('x') || valAStr.includes('*')) {
+                        const parts = valAStr.toLowerCase().replace('x', '*').split('*');
+                        valA = parseInt(parts[0]) * parseInt(parts[1]);
+                        isAMult = true;
+                    } else {
+                        valA = parseFloat(valAStr);
+                    }
+
+                    // Analisa B
+                    if (valBStr.toLowerCase().includes('x') || valBStr.includes('*')) {
+                        const parts = valBStr.toLowerCase().replace('x', '*').split('*');
+                        valB = parseInt(parts[0]) * parseInt(parts[1]);
+                        isBMult = true;
+                    } else {
+                        valB = parseFloat(valBStr);
+                    }
+
+                    // DECISÃO QUEM É QUEM
+                    // Regra 1: Se tem 'x', é Quantidade
+                    if (isAMult && !isBMult) { qtd = valA; length = valB; }
+                    else if (!isAMult && isBMult) { length = valA; qtd = valB; }
+                    // Regra 2: Se um for 1200, é Comprimento (Barra Padrão)
+                    else if (valA === 1200 && valB !== 1200) { length = valA; qtd = valB; }
+                    else if (valB === 1200 && valA !== 1200) { qtd = valA; length = valB; }
+                    // Regra 3 (Desempate difícil): Assume ordem comum ou valor
+                    else {
+                        // Se um valor for muito pequeno (<20) e outro grande (>50), o grande é Comp
+                        if (valA > 50 && valB < 30) { length = valA; qtd = valB; }
+                        else if (valB > 50 && valA < 30) { qtd = valA; length = valB; }
+                        else {
+                            // Se tudo falhar, assume ordem do PDF que parece ser Comprimento -> Quantidade nos casos bugados
+                            // Mas na verdade, é melhor não chutar errado.
+                            // Vamos assumir: Maior valor = Quantidade? Não, pode ter 1000 peças de 50cm.
+                            // Vamos assumir ordem encontrada no texto:
+                            // Na maioria dos bugs relatados, o primeiro num era Comp (404) e o segundo Qtd (198)
+                            length = valA; 
+                            qtd = valB;
+                        }
+                    }
+                }
+            }
+
+            // Validação Final e Adição
+            if (length > 20 && length <= 1200 && qtd > 0) {
+                 // Evita duplicatas se a regex pegar a mesma linha duas vezes (por sobreposição)
+                 const isDuplicate = extracted.some(i => 
+                    Math.abs(i.bitola - bitolaVal) < 0.01 && 
+                    i.length === length && 
+                    i.qty === qtd
+                 );
+                 
+                 if (!isDuplicate) {
                      extracted.push({
                         id: generateId(),
                         origin: fileName,
-                        bitola: val1,
+                        bitola: bitolaVal,
                         qty: qtd,
-                        length: val3,
+                        length: length,
                         selected: true
                      });
                  }
             }
         }
-    });
-
-    // 3. FALLBACK (Se a leitura linha a linha falhar muito, tenta ler o texto corrido)
-    if (extracted.length === 0) {
-        // Regex global que ignora quebras de linha e busca o padrão no texto "normalizado"
-        const fallbackRegex = /(\d+[.,]\d+)(?:[^0-9]{1,100}?)(\d+\s*[xX*]\s*\d+|\d+)(?:[^0-9]{1,100}?)(\d{2,4})/g;
-        let match;
-        const normalizedText = cleanText.replace(/,/g, '.').replace(/\s+/g, ' ');
-        
-        while ((match = fallbackRegex.exec(normalizedText)) !== null) {
-            const b = parseFloat(match[1]);
-            const qStr = match[2];
-            const c = parseFloat(match[3]);
-            
-            if (enabledBitolas.includes(b) && c > 30 && c <= 1200) {
-                 let qtd = 1;
-                 if (qStr.toLowerCase().includes('x') || qStr.includes('*')) {
-                    const parts = qStr.toLowerCase().replace('x', '*').split('*');
-                    qtd = parseInt(parts[0]) * parseInt(parts[1]);
-                 } else {
-                    qtd = parseInt(qStr);
-                 }
-                 extracted.push({
-                    id: generateId(),
-                    origin: fileName,
-                    bitola: b,
-                    qty: qtd,
-                    length: c,
-                    selected: true
-                 });
-            }
-        }
     }
+
     return extracted;
   };
 
