@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Trash2, Plus, Download, Clipboard, ArrowRight, Save, RefreshCw, FileText, Settings, Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, FolderUp, X, Eraser } from 'lucide-react';
+
 // Importamos a lógica externa aqui:
 import { extractTextFromPDF, parseTextToItems, BITOLAS_COMERCIAIS, generateId } from './pdfProcessor';
+// Import da nova lógica de otimização separada
+import { calculateCutPlan } from './cutOptimizer';
 
 const OtimizadorCorteAco = () => {
   // --- Estados ---
@@ -312,124 +315,36 @@ const OtimizadorCorteAco = () => {
     doc.save(`Relatorio_Estoque_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`);
   };
 
-  // --- OTIMIZAÇÃO E AGRUPAMENTO ---
+  // --- OTIMIZAÇÃO E AGRUPAMENTO (REFATORADO) ---
   const runOptimization = () => {
-    if (filteredItems.length === 0) {
+    // Pega apenas os itens visíveis e selecionados para o cálculo
+    const itemsToCut = filteredItems.filter(item => item.selected);
+
+    if (itemsToCut.length === 0) {
         alert("Nenhum item válido para cortar (verifique se a lista está vazia ou se as bitolas estão desmarcadas).");
         return;
     }
 
-    const itemsByBitola = {};
-    const inventoryByBitola = {};
+    // Ativa loading state
+    setIsProcessing(true);
 
-    filteredItems.forEach(item => {
-        if (!item.selected) return;
-        if (!itemsByBitola[item.bitola]) itemsByBitola[item.bitola] = [];
-        for (let i = 0; i < item.qty; i++) {
-            itemsByBitola[item.bitola].push({ ...item, realId: `${item.id}-${i}` });
+    // Timeout para permitir que a UI renderize o spinner antes de travar no cálculo síncrono
+    setTimeout(() => {
+        try {
+            // Chama a função pura de cálculo importada
+            const finalResult = calculateCutPlan(itemsToCut, inventory, BARRA_PADRAO, PERDA_CORTE);
+
+            setResults(finalResult);
+            setActiveTab('results');
+            // Ao calcular, define a aba de resultados como 'todas' para mostrar o geral inicialmente
+            setActiveResultsBitola('todas');
+        } catch (error) {
+            console.error("Erro no cálculo:", error);
+            alert("Ocorreu um erro inesperado ao calcular o plano de corte.");
+        } finally {
+            setIsProcessing(false);
         }
-    });
-
-    inventory.forEach(inv => {
-        if (!inventoryByBitola[inv.bitola]) inventoryByBitola[inv.bitola] = [];
-        const qtdDisponivel = inv.qty || 1; 
-        for(let i=0; i < qtdDisponivel; i++) {
-            inventoryByBitola[inv.bitola].push({ 
-                ...inv, 
-                virtualId: `${inv.id}_copy_${i}`,
-                used: false 
-            });
-        }
-    });
-
-    const finalResult = [];
-
-    Object.keys(itemsByBitola).forEach(bitola => {
-        const demandList = itemsByBitola[bitola].sort((a, b) => b.length - a.length);
-        const stockList = inventoryByBitola[bitola] ? inventoryByBitola[bitola].sort((a, b) => a.length - b.length) : [];
-
-        const barsUsed = [];
-
-        demandList.forEach(piece => {
-            let fitted = false;
-            let bestBarIndex = -1;
-            let minWaste = Infinity;
-
-            for (let i = 0; i < barsUsed.length; i++) {
-                const bar = barsUsed[i];
-                if (bar.remaining >= piece.length + PERDA_CORTE) {
-                    const waste = bar.remaining - (piece.length + PERDA_CORTE);
-                    if (waste < minWaste) {
-                        minWaste = waste;
-                        bestBarIndex = i;
-                    }
-                }
-            }
-
-            if (bestBarIndex !== -1) {
-                barsUsed[bestBarIndex].cuts.push(piece.length);
-                barsUsed[bestBarIndex].remaining -= (piece.length + PERDA_CORTE);
-                fitted = true;
-            }
-
-            if (!fitted) {
-                let bestStockIndex = -1;
-                let minStockWaste = Infinity;
-
-                for (let i = 0; i < stockList.length; i++) {
-                    if (!stockList[i].used && stockList[i].length >= piece.length) {
-                        const waste = stockList[i].length - piece.length;
-                        if (waste < minStockWaste) {
-                            minStockWaste = waste;
-                            bestStockIndex = i;
-                        }
-                    }
-                }
-
-                if (bestStockIndex !== -1) {
-                    stockList[bestStockIndex].used = true;
-                    barsUsed.push({
-                        type: 'estoque',
-                        originalLength: stockList[bestStockIndex].length,
-                        remaining: stockList[bestStockIndex].length - piece.length - PERDA_CORTE,
-                        cuts: [piece.length],
-                        id: stockList[bestStockIndex].id
-                    });
-                    fitted = true;
-                }
-            }
-
-            if (!fitted) {
-                barsUsed.push({
-                    type: 'nova',
-                    originalLength: BARRA_PADRAO,
-                    remaining: BARRA_PADRAO - piece.length - PERDA_CORTE,
-                    cuts: [piece.length],
-                    id: 'new-' + generateId()
-                });
-            }
-        });
-
-        const groupedBars = [];
-        barsUsed.forEach(bar => {
-            const sortedCuts = [...bar.cuts].sort((a,b) => b-a);
-            const signature = `${bar.type}-${bar.originalLength}-${sortedCuts.join(',')}`;
-            const existingGroup = groupedBars.find(g => g.signature === signature);
-            if (existingGroup) {
-                existingGroup.count++;
-                existingGroup.ids.push(bar.id);
-            } else {
-                groupedBars.push({ ...bar, cuts: sortedCuts, count: 1, signature: signature, ids: [bar.id] });
-            }
-        });
-
-        finalResult.push({ bitola: bitola, bars: groupedBars });
-    });
-
-    setResults(finalResult);
-    setActiveTab('results');
-    // Ao calcular, define a aba de resultados como 'todas' para mostrar o geral inicialmente
-    setActiveResultsBitola('todas');
+    }, 100);
   };
 
   const generatePDF = () => {
@@ -446,8 +361,6 @@ const OtimizadorCorteAco = () => {
     doc.text(`Data: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`, 105, yPos, { align: 'center' });
     yPos += 15;
 
-    // Filtra para o PDF apenas o que está sendo visualizado na tela, ou tudo?
-    // Geralmente PDF imprime tudo, mas podemos dar opção. Por padrão, vamos imprimir TUDO.
     results.forEach(group => {
         if (yPos > 270) { doc.addPage(); yPos = 20; }
         doc.setFillColor(240, 240, 240);
@@ -571,11 +484,7 @@ const OtimizadorCorteAco = () => {
             {tabs.map(tab => {
                 const isActive = current === tab;
                 let label = tab === 'todas' ? 'Todas' : `${parseFloat(tab).toFixed(1)} mm`;
-                if(tab !== 'todas') {
-                    // Contagem opcional para dar mais contexto (se for aba de results, por exemplo)
-                    // Mas manter simples é melhor por agora.
-                }
-
+                
                 return (
                     <button
                         key={tab}
@@ -814,10 +723,11 @@ const OtimizadorCorteAco = () => {
             <div className="flex justify-end pb-8">
                 <button 
                     onClick={runOptimization}
-                    disabled={filteredItems.length === 0}
+                    disabled={filteredItems.length === 0 || isProcessing}
                     className={`px-8 py-3 rounded-md shadow-md font-bold flex items-center gap-2 transition-all ${filteredItems.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:scale-105'}`}
                 >
-                    <RefreshCw size={20} /> CALCULAR PLANO DE CORTE
+                    {isProcessing ? <RefreshCw className="animate-spin" size={20} /> : <RefreshCw size={20} />}
+                    {isProcessing ? "CALCULANDO..." : "CALCULAR PLANO DE CORTE"}
                 </button>
             </div>
           </div>
