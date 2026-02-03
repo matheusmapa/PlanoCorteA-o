@@ -1,9 +1,9 @@
 import * as pdfjsLib from 'pdfjs-dist';
-// Importação especial do Worker para o Vite funcionar na Vercel
-import pdfWorker from 'pdfjs-dist/build/pdf.worker.mjs?url';
 
-// Configura o worker
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
+// --- CORREÇÃO DO ERRO ---
+// Em vez de importar localmente (o que quebra no Vercel/Vite), usamos o CDN direto.
+// Isso garante que o worker seja carregado sem depender do build do Vite.
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js`;
 
 // --- CONSTANTES ---
 export const BITOLAS_COMERCIAIS = [4.2, 5.0, 6.3, 8.0, 10.0, 12.5, 16.0, 20.0, 25.0, 32.0, 40.0];
@@ -17,6 +17,7 @@ export const generateId = () => {
 export const extractTextFromPDF = async (file) => {
   try {
       const arrayBuffer = await file.arrayBuffer();
+      // Usamos a lib importada 'pdfjsLib'
       const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
       let fullText = "";
 
@@ -37,11 +38,11 @@ export const extractTextFromPDF = async (file) => {
       return fullText;
   } catch (error) {
       console.error("Erro ao ler PDF:", error);
-      throw new Error("Falha ao processar o arquivo PDF.");
+      throw new Error("Falha ao processar o arquivo PDF. Verifique se é um PDF válido.");
   }
 };
 
-// --- PARSER (Mantido igual, só copiei sua lógica original) ---
+// --- PARSER (Lógica de Extração) ---
 export const parseTextToItems = (text, fileName) => {
   let cleanText = text
       .replace(/CA\s*-?\s*\d+/gi, '') 
