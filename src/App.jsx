@@ -18,7 +18,7 @@ const OtimizadorCorteAco = () => {
   const [showManualInputModal, setShowManualInputModal] = useState(false);
   const [newManualItemData, setNewManualItemData] = useState({ bitola: 10.0, length: 100, qty: 1 });
 
-  // Filtro de quais bitolas aceitar na importação
+  // Filtro de quais bitolas aceitar na importação e visualização
   const BITOLAS_COMERCIAIS = [4.2, 5.0, 6.3, 8.0, 10.0, 12.5, 16.0, 20.0, 25.0, 32.0, 40.0];
   const [enabledBitolas, setEnabledBitolas] = useState([...BITOLAS_COMERCIAIS]);
 
@@ -99,6 +99,10 @@ const OtimizadorCorteAco = () => {
       }
   };
 
+  // --- DERIVED STATE: Items Filtrados ---
+  // Apenas itens cujas bitolas estão habilitadas são mostrados e usados no cálculo
+  const filteredItems = items.filter(item => enabledBitolas.includes(item.bitola));
+
   // --- Lógica de Leitura de PDF (Entrada) ---
   const extractTextFromPDF = async (file) => {
     if (!window.pdfjsLib) {
@@ -176,7 +180,7 @@ const OtimizadorCorteAco = () => {
   };
 
   const parseTextToItems = (text, fileName) => {
-    // 1. LIMPEZA SEGURA (MANTENDO LABELS "Qtde" e "Compr")
+    // 1. LIMPEZA SEGURA
     let cleanText = text
         .replace(/CA\s*-?\s*\d+/gi, '') // Remove CA50/CA60
         .replace(/\$/g, '')
@@ -184,41 +188,31 @@ const OtimizadorCorteAco = () => {
         .replace(/\\/g, '')
         .replace(/CONSUMIDOR FINAL\/CF/g, '')
         .replace(/Código: \d+/g, '')
-        .replace(/L\d+=.*?(\n|$)/g, '') // Remove trechos L1=...
-        .replace(/Peso.*?(\n|$)/g, '')  // Remove Peso
-        // Remove cabeçalhos que não sejam úteis, mas mantém Qtde/Compr
+        .replace(/L\d+=.*?(\n|$)/g, '') 
+        .replace(/Peso.*?(\n|$)/g, '')  
         .replace(/Bitola \(mm\)|Aço|Trechos|Página \d+ de \d+/gi, '');
 
-    // Normaliza quebras de linha para espaço para busca global
     const normalizedText = cleanText.replace(/,/g, '.').replace(/\s+/g, ' ');
     const extracted = [];
 
-    // 2. BUSCA POR CONTEXTO (Bitola ... Contexto)
-    // Encontra todas as ocorrências de Bitolas válidas (Ex: 8.00, 12.50)
-    // e captura o texto seguinte para procurar Qtde e Compr dentro dele.
     const bitolaRegex = /(\d+[.,]\d+)/g;
     let match;
 
     while ((match = bitolaRegex.exec(normalizedText)) !== null) {
         const bitolaVal = parseFloat(match[1]);
         
-        // Se for uma bitola válida
-        if (enabledBitolas.includes(bitolaVal)) {
-            // Pega um "chunk" de texto à frente (ex: 150 caracteres)
+        // MUDANÇA: Aceita qualquer bitola comercial, independente do filtro atual
+        // Isso permite carregar tudo e filtrar depois visualmente
+        if (BITOLAS_COMERCIAIS.includes(bitolaVal)) {
             const startIndex = bitolaRegex.lastIndex;
             const contextChunk = normalizedText.substring(startIndex, startIndex + 180);
 
-            // Tenta encontrar Qtde e Compr usando os labels
-            // Ex: Qtde 198  ou  Qtde x Rep 31x2
             const qtdeMatch = contextChunk.match(/Qtde\s*[a-zA-Z]*\s*[:.]?\s*(\d+(?:\s*[xX*]\s*\d+)?)/i);
-            // Ex: Compr 404
             const comprMatch = contextChunk.match(/Compr\w*\s*[:.]?\s*(\d{2,4})/i);
 
             let qtd = 0;
             let length = 0;
-            let foundByLabel = false;
 
-            // CASO 1: Encontrou pelos LABELS (Mais seguro)
             if (qtdeMatch && comprMatch) {
                 length = parseFloat(comprMatch[1]);
                 const qStr = qtdeMatch[1];
@@ -228,17 +222,11 @@ const OtimizadorCorteAco = () => {
                 } else {
                     qtd = parseInt(qStr);
                 }
-                foundByLabel = true;
             } 
-            // CASO 2: HEURÍSTICA (Labels falharam ou texto bagunçado)
             else {
-                // Procura os próximos dois números "soltos"
                 const fallbackNums = contextChunk.matchAll(/(\d+(?:\s*[xX*]\s*\d+)?)/g);
                 const candidates = [];
                 for (const m of fallbackNums) {
-                    // Ignora números muito pequenos que pareçam Posição (ex: 03) se estiverem isolados e longe
-                    // Mas '03' pode estar colado na bitola no texto original.
-                    // Vamos pegar os 2 primeiros candidatos numéricos encontrados
                     candidates.push(m[1]);
                     if (candidates.length >= 2) break;
                 }
@@ -246,56 +234,34 @@ const OtimizadorCorteAco = () => {
                 if (candidates.length >= 2) {
                     const valAStr = candidates[0];
                     const valBStr = candidates[1];
-                    
                     let valA = 0, valB = 0;
                     let isAMult = false, isBMult = false;
 
-                    // Analisa A
                     if (valAStr.toLowerCase().includes('x') || valAStr.includes('*')) {
                         const parts = valAStr.toLowerCase().replace('x', '*').split('*');
                         valA = parseInt(parts[0]) * parseInt(parts[1]);
                         isAMult = true;
-                    } else {
-                        valA = parseFloat(valAStr);
-                    }
+                    } else { valA = parseFloat(valAStr); }
 
-                    // Analisa B
                     if (valBStr.toLowerCase().includes('x') || valBStr.includes('*')) {
                         const parts = valBStr.toLowerCase().replace('x', '*').split('*');
                         valB = parseInt(parts[0]) * parseInt(parts[1]);
                         isBMult = true;
-                    } else {
-                        valB = parseFloat(valBStr);
-                    }
+                    } else { valB = parseFloat(valBStr); }
 
-                    // DECISÃO QUEM É QUEM
-                    // Regra 1: Se tem 'x', é Quantidade
                     if (isAMult && !isBMult) { qtd = valA; length = valB; }
                     else if (!isAMult && isBMult) { length = valA; qtd = valB; }
-                    // Regra 2: Se um for 1200, é Comprimento (Barra Padrão)
                     else if (valA === 1200 && valB !== 1200) { length = valA; qtd = valB; }
                     else if (valB === 1200 && valA !== 1200) { qtd = valA; length = valB; }
-                    // Regra 3 (Desempate difícil): Assume ordem comum ou valor
                     else {
-                        // Se um valor for muito pequeno (<20) e outro grande (>50), o grande é Comp
                         if (valA > 50 && valB < 30) { length = valA; qtd = valB; }
                         else if (valB > 50 && valA < 30) { qtd = valA; length = valB; }
-                        else {
-                            // Se tudo falhar, assume ordem do PDF que parece ser Comprimento -> Quantidade nos casos bugados
-                            // Mas na verdade, é melhor não chutar errado.
-                            // Vamos assumir: Maior valor = Quantidade? Não, pode ter 1000 peças de 50cm.
-                            // Vamos assumir ordem encontrada no texto:
-                            // Na maioria dos bugs relatados, o primeiro num era Comp (404) e o segundo Qtd (198)
-                            length = valA; 
-                            qtd = valB;
-                        }
+                        else { length = valA; qtd = valB; }
                     }
                 }
             }
 
-            // Validação Final e Adição
             if (length > 20 && length <= 1200 && qtd > 0) {
-                 // Evita duplicatas se a regex pegar a mesma linha duas vezes (por sobreposição)
                  const isDuplicate = extracted.some(i => 
                     Math.abs(i.bitola - bitolaVal) < 0.01 && 
                     i.length === length && 
@@ -481,15 +447,16 @@ const OtimizadorCorteAco = () => {
 
   // --- OTIMIZAÇÃO E AGRUPAMENTO ---
   const runOptimization = () => {
-    if (items.length === 0) {
-        alert("Adicione itens na lista de corte primeiro!");
+    // MUDANÇA: Usa filteredItems para o cálculo
+    if (filteredItems.length === 0) {
+        alert("Nenhum item válido para cortar (verifique se a lista está vazia ou se as bitolas estão desmarcadas).");
         return;
     }
 
     const itemsByBitola = {};
     const inventoryByBitola = {};
 
-    items.forEach(item => {
+    filteredItems.forEach(item => {
         if (!item.selected) return;
         if (!itemsByBitola[item.bitola]) itemsByBitola[item.bitola] = [];
         for (let i = 0; i < item.qty; i++) {
@@ -595,9 +562,10 @@ const OtimizadorCorteAco = () => {
 
     setResults(finalResult);
     setActiveTab('results');
-    setItems([]);
-    setUploadedFiles([]);
-    if(fileInputRef.current) fileInputRef.current.value = '';
+    // MUDANÇA: Não limpamos mais items automaticamente, pois o usuário pode querer mudar o filtro e recalcular
+    // setItems([]); 
+    // setUploadedFiles([]);
+    // if(fileInputRef.current) fileInputRef.current.value = '';
   };
 
   const generatePDF = () => {
@@ -785,7 +753,7 @@ const OtimizadorCorteAco = () => {
           <div className="space-y-6">
             <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
                 <div className="flex justify-between items-center mb-2">
-                    <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Filtro de Importação: Selecione as bitolas</h3>
+                    <h3 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Filtro Visual: Exibir bitolas</h3>
                     <button onClick={toggleAllBitolas} className="text-xs text-blue-600 hover:underline">
                         {enabledBitolas.length === BITOLAS_COMERCIAIS.length ? "Desmarcar todas" : "Marcar todas"}
                     </button>
@@ -889,7 +857,15 @@ const OtimizadorCorteAco = () => {
                       </tr>
                     </thead>
                     <tbody>
-                      {items.map((item, idx) => (
+                      {/* MUDANÇA: Renderiza apenas items filtrados */}
+                      {filteredItems.length === 0 && items.length > 0 && (
+                          <tr>
+                              <td colSpan="5" className="text-center py-4 text-slate-500 italic">
+                                  Existem itens carregados, mas estão ocultos pelo filtro de bitolas acima.
+                              </td>
+                          </tr>
+                      )}
+                      {filteredItems.map((item, idx) => (
                         <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50">
                           <td className="px-4 py-2">
                             <select 
@@ -939,7 +915,8 @@ const OtimizadorCorteAco = () => {
             <div className="flex justify-end pb-8">
                 <button 
                     onClick={runOptimization}
-                    className={`px-8 py-3 rounded-md shadow-md font-bold flex items-center gap-2 transition-all ${items.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:scale-105'}`}
+                    disabled={filteredItems.length === 0}
+                    className={`px-8 py-3 rounded-md shadow-md font-bold flex items-center gap-2 transition-all ${filteredItems.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:scale-105'}`}
                 >
                     <RefreshCw size={20} /> CALCULAR PLANO DE CORTE
                 </button>
