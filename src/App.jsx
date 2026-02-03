@@ -1,12 +1,16 @@
+// src/App.jsx
 import React, { useState, useEffect, useRef } from 'react';
-import { Trash2, Plus, Download, Clipboard, ArrowRight, Save, RefreshCw, FileText, Settings, Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, FolderUp, X, Eraser } from 'lucide-react';
+import { Trash2, Plus, Download, Clipboard, ArrowRight, Save, RefreshCw, FileText, Settings, Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, FolderUp, X, Eraser, LogOut, User } from 'lucide-react';
+import { onAuthStateChanged, signOut } from 'firebase/auth';
 
-// Importamos a lógica externa aqui:
+// Importamos a lógica externa
 import { extractTextFromPDF, parseTextToItems, BITOLAS_COMERCIAIS, generateId } from './pdfProcessor';
-// Import da nova lógica de otimização separada
 import { calculateCutPlan } from './cutOptimizer';
+import { auth } from './firebase'; // Importa a config do firebase
+import Login from './Login'; // Importa a tela de Login
 
-const OtimizadorCorteAco = () => {
+// --- COMPONENTE PRINCIPAL DO OTIMIZADOR ---
+const OtimizadorCorteAco = ({ user }) => {
   // --- Estados ---
   const [activeTab, setActiveTab] = useState('input'); // input, inventory, results
   const [items, setItems] = useState([]); // DEMANDA
@@ -81,8 +85,14 @@ const OtimizadorCorteAco = () => {
   }, []);
 
   const saveInventoryToLocal = (newInv) => {
-    setInventory([...newInv]); // Garante nova referência para re-render
+    setInventory([...newInv]);
     localStorage.setItem('estoquePontas', JSON.stringify(newInv));
+  };
+
+  const handleLogout = () => {
+      if(window.confirm("Deseja realmente sair?")) {
+          signOut(auth);
+      }
   };
 
   // --- Lógica de Filtro de Bitolas ---
@@ -124,13 +134,11 @@ const OtimizadorCorteAco = () => {
         try {
             let text = "";
             if (file.type === "application/pdf") {
-                // Chama função do arquivo externo
                 text = await extractTextFromPDF(file);
             } else {
                 text = await file.text();
             }
 
-            // Chama função do arquivo externo
             const itemsFromThisFile = parseTextToItems(text, file.name);
             allExtractedItems = [...allExtractedItems, ...itemsFromThisFile];
             
@@ -195,7 +203,6 @@ const OtimizadorCorteAco = () => {
   };
 
   // --- Manipulação de Estoque (Pontas) ---
-  
   const openAddStockModal = () => {
       setNewStockItemData({ bitola: 10.0, length: 100, qty: 1 });
       setShowAddStockModal(true);
@@ -207,7 +214,6 @@ const OtimizadorCorteAco = () => {
           alert("Comprimento e Quantidade devem ser maiores que zero.");
           return;
       }
-      
       const newPonta = { 
           id: generateId(), 
           bitola: parseFloat(bitola), 
@@ -215,7 +221,6 @@ const OtimizadorCorteAco = () => {
           qty: parseInt(qty), 
           source: 'estoque_manual' 
       };
-      
       saveInventoryToLocal([...inventory, newPonta]);
       setShowAddStockModal(false);
   };
@@ -248,7 +253,6 @@ const OtimizadorCorteAco = () => {
   };
 
   const handleRestoreClick = () => {
-      // Gatilho seguro para o input file
       if (inventoryInputRef.current) {
           inventoryInputRef.current.click();
       }
@@ -285,7 +289,6 @@ const OtimizadorCorteAco = () => {
           } catch (err) {
               alert("Erro ao ler arquivo. Verifique se é um JSON válido.");
           }
-          // Limpa o input para permitir selecionar o mesmo arquivo novamente
           if(inventoryInputRef.current) inventoryInputRef.current.value = '';
       };
       reader.readAsText(file);
@@ -315,28 +318,19 @@ const OtimizadorCorteAco = () => {
     doc.save(`Relatorio_Estoque_${new Date().toLocaleDateString().replace(/\//g, '-')}.pdf`);
   };
 
-  // --- OTIMIZAÇÃO E AGRUPAMENTO (REFATORADO) ---
+  // --- OTIMIZAÇÃO (REFATORADO) ---
   const runOptimization = () => {
-    // Pega apenas os itens visíveis e selecionados para o cálculo
     const itemsToCut = filteredItems.filter(item => item.selected);
-
     if (itemsToCut.length === 0) {
         alert("Nenhum item válido para cortar (verifique se a lista está vazia ou se as bitolas estão desmarcadas).");
         return;
     }
-
-    // Ativa loading state
     setIsProcessing(true);
-
-    // Timeout para permitir que a UI renderize o spinner antes de travar no cálculo síncrono
     setTimeout(() => {
         try {
-            // Chama a função pura de cálculo importada
             const finalResult = calculateCutPlan(itemsToCut, inventory, BARRA_PADRAO, PERDA_CORTE);
-
             setResults(finalResult);
             setActiveTab('results');
-            // Ao calcular, define a aba de resultados como 'todas' para mostrar o geral inicialmente
             setActiveResultsBitola('todas');
         } catch (error) {
             console.error("Erro no cálculo:", error);
@@ -475,16 +469,13 @@ const OtimizadorCorteAco = () => {
     }
   };
 
-  // --- Função Helper para Renderizar Abas de Bitola ---
   const renderBitolaTabs = (current, setFunction, availableBitolas) => {
-    // Adiciona 'todas' no início da lista
     const tabs = ['todas', ...availableBitolas];
     return (
         <div className="flex overflow-x-auto gap-1 border-b border-slate-200 mb-4 pb-0 no-scrollbar items-end h-10 px-1">
             {tabs.map(tab => {
                 const isActive = current === tab;
                 let label = tab === 'todas' ? 'Todas' : `${parseFloat(tab).toFixed(1)} mm`;
-                
                 return (
                     <button
                         key={tab}
@@ -504,17 +495,9 @@ const OtimizadorCorteAco = () => {
     );
   };
 
-  // --- Função para determinar a classe do botão Resultado ---
   const getResultsTabClass = () => {
-      // Se estiver ativo
-      if (activeTab === 'results') {
-          return 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm';
-      }
-      // Se não estiver ativo mas tiver resultados (clicável e visualmente disponível)
-      if (results) {
-          return 'bg-green-50 text-green-700 hover:bg-green-100 border-b-2 border-transparent hover:border-green-300 transition-all';
-      }
-      // Se não tiver resultados (bloqueado)
+      if (activeTab === 'results') return 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm';
+      if (results) return 'bg-green-50 text-green-700 hover:bg-green-100 border-b-2 border-transparent hover:border-green-300 transition-all';
       return 'text-slate-400 cursor-not-allowed';
   };
 
@@ -526,8 +509,17 @@ const OtimizadorCorteAco = () => {
             <Settings className="w-6 h-6 text-yellow-500" />
             <h1 className="text-xl font-bold tracking-tight">Otimizador Corte & Dobra</h1>
           </div>
-          <div className="text-sm text-slate-400 bg-slate-800 px-3 py-1 rounded-full border border-slate-700">
-            Barras Padrão: 1200cm (Automático)
+          <div className="flex items-center gap-4">
+            <div className="hidden sm:flex items-center gap-2 text-sm text-slate-300">
+                <User size={14} />
+                <span>{user.email}</span>
+            </div>
+            <button 
+                onClick={handleLogout}
+                className="flex items-center gap-1 text-xs bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-full transition-colors"
+            >
+                <LogOut size={12} /> Sair
+            </button>
           </div>
         </div>
       </header>
@@ -1017,7 +1009,6 @@ const OtimizadorCorteAco = () => {
                 </div>
                 
                 {/* --- ABAS DE BITOLA (RESULTS) --- */}
-                {/* Calcula quais bitolas realmente tem resultados para mostrar nas abas */}
                 {(() => {
                     const resultBitolas = results.map(r => parseFloat(r.bitola)).sort((a,b) => a-b);
                     return renderBitolaTabs(activeResultsBitola, setActiveResultsBitola, resultBitolas);
@@ -1105,4 +1096,32 @@ const OtimizadorCorteAco = () => {
   );
 };
 
-export default OtimizadorCorteAco;
+// --- WRAPPER PRINCIPAL COM AUTENTICAÇÃO ---
+const App = () => {
+    const [user, setUser] = useState(null);
+    const [loading, setLoading] = useState(true);
+
+    useEffect(() => {
+        const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+            setUser(currentUser);
+            setLoading(false);
+        });
+        return () => unsubscribe();
+    }, []);
+
+    if (loading) {
+        return (
+            <div className="min-h-screen bg-slate-100 flex items-center justify-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div>
+            </div>
+        );
+    }
+
+    if (!user) {
+        return <Login />;
+    }
+
+    return <OtimizadorCorteAco user={user} />;
+};
+
+export default App;
