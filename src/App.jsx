@@ -3,7 +3,7 @@ import {
   Trash2, Plus, Download, Clipboard, Save, RefreshCw, FileText, Settings, 
   Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, 
   FolderUp, X, Eraser, LogOut, User, Menu, FolderHeart, Calendar, Edit3, 
-  Check, History, RotateCcw, BarChart3 // <--- ADICIONADO BarChart3
+  Check, History, RotateCcw, BarChart3, Lightbulb // <--- IMPORTADO LIGHTBULB
 } from 'lucide-react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, setDoc, getDocs, writeBatch } from 'firebase/firestore';
@@ -13,7 +13,8 @@ import { extractTextFromPDF, parseTextToItems, BITOLAS_COMERCIAIS, generateId } 
 import { calculateCutPlan } from './cutOptimizer';
 import { auth, db } from './firebase'; 
 import Login from './Login';
-import PlanEvaluator from './PlanEvaluator'; // <--- IMPORTADO O NOVO COMPONENTE
+import PlanEvaluator from './PlanEvaluator'; // Comparador de Planos (Output)
+import StrategyAnalyzer from './StrategyAnalyzer'; // Analisador de Estratégia (Input)
 
 // --- COMPONENTE PRINCIPAL ---
 const OtimizadorCorteAco = ({ user }) => {
@@ -821,6 +822,11 @@ const OtimizadorCorteAco = ({ user }) => {
           <button onClick={() => setActiveTab('input')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'input' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
             <FileText size={18} /> Demanda
           </button>
+          
+          <button onClick={() => setActiveTab('strategy')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'strategy' ? 'bg-white border-b-2 border-amber-500 text-amber-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
+            <Lightbulb size={18} /> Estratégia
+          </button>
+
           <button onClick={() => setActiveTab('inventory')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'inventory' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
             <Clipboard size={18} /> Estoque ({inventory.reduce((acc, i) => acc + i.qty, 0)})
           </button>
@@ -976,6 +982,51 @@ const OtimizadorCorteAco = ({ user }) => {
                 </button>
             </div>
           </div>
+        )}
+
+        {/* --- TAB: STRATEGY (ANALISADOR) --- */}
+        {activeTab === 'strategy' && (
+            <StrategyAnalyzer 
+                projects={projects}
+                inventory={inventory} // Opcional, caso queira evoluir para usar estoque real depois
+                onLoadProject={(selectedProjects) => {
+                    // Esta função carrega os projetos escolhidos para a aba de Demanda
+                    const newItems = [];
+                    const newUploadedFiles = [...uploadedFiles];
+                    
+                    selectedProjects.forEach(proj => {
+                        // Verifica se já não foi carregado para evitar duplicatas visuais
+                        if (!uploadedFiles.some(f => f.id === proj.id)) {
+                            const projectOriginName = `[PROJETO] ${proj.name}`;
+                            const itemsWithOrigin = proj.items.map(item => ({
+                                ...item,
+                                id: generateId(), // Gera novos IDs para não conflitar
+                                origin: projectOriginName
+                            }));
+                            
+                            newItems.push(...itemsWithOrigin);
+                            newUploadedFiles.push({
+                                id: proj.id,
+                                name: proj.name,
+                                originName: projectOriginName,
+                                type: 'project',
+                                status: 'ok',
+                                count: itemsWithOrigin.length
+                            });
+                        }
+                    });
+
+                    if (newItems.length > 0) {
+                        setItems(prev => [...prev, ...newItems]);
+                        setUploadedFiles(newUploadedFiles);
+                        alert(`Estratégia carregada! ${selectedProjects.length} projeto(s) adicionado(s) à Demanda.`);
+                        setActiveTab('input'); // Leva o usuário para a tela de input para conferir
+                    } else {
+                        alert("Os projetos selecionados já estão na lista de corte.");
+                        setActiveTab('input');
+                    }
+                }}
+            />
         )}
 
         {/* --- TAB: INVENTORY --- */}
