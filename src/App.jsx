@@ -3,7 +3,7 @@ import {
   Trash2, Plus, Download, Clipboard, Save, RefreshCw, FileText, Settings, 
   Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, 
   FolderUp, X, Eraser, LogOut, User, Menu, FolderHeart, Calendar, Edit3, 
-  Check, History, RotateCcw, BarChart3, Lightbulb, Layers // Ícones atualizados
+  Check, History, RotateCcw, BarChart3, Lightbulb, Layers, Database, Share2 // Ícones atualizados
 } from 'lucide-react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, setDoc, getDocs, writeBatch } from 'firebase/firestore';
@@ -37,7 +37,8 @@ const OtimizadorCorteAco = ({ user }) => {
   
   // --- Estados de Modais e UI ---
   const [showBackupModal, setShowBackupModal] = useState(false);
-  const [showStrategyModal, setShowStrategyModal] = useState(false); // NOVO: Modal de Estratégia
+  const [showStrategyModal, setShowStrategyModal] = useState(false);
+  const [showDataModal, setShowDataModal] = useState(false); // NOVO: Modal de Dados (Export/Import)
   const [backupsList, setBackupsList] = useState([]);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
@@ -52,7 +53,15 @@ const OtimizadorCorteAco = ({ user }) => {
   const [newManualItemData, setNewManualItemData] = useState({ bitola: 10.0, length: 100, qty: 1 });
   const [enabledBitolas, setEnabledBitolas] = useState([...BITOLAS_COMERCIAIS]);
 
+  // --- Estados de Exportação ---
+  const [exportSelection, setExportSelection] = useState({
+    projects: true,
+    inventory: true,
+    plans: true
+  });
+
   const fileInputRef = useRef(null);
+  const importFileInputRef = useRef(null);
 
   const BARRA_PADRAO = 1200;
   const PERDA_CORTE = 0;
@@ -144,6 +153,123 @@ const OtimizadorCorteAco = ({ user }) => {
 
     return cleanupScripts;
   }, [user]);
+
+  // --- FUNÇÕES DE EXPORTAÇÃO E IMPORTAÇÃO (NOVO) ---
+  const handleExportData = () => {
+      const dataToExport = {
+          version: '1.0',
+          exportedAt: new Date().toISOString(),
+          userEmail: user.email,
+          inventory: exportSelection.inventory ? inventory : [],
+          projects: exportSelection.projects ? projects : [],
+          savedPlans: exportSelection.plans ? savedPlans : []
+      };
+
+      const fileName = `dados_otimizador_${new Date().toISOString().slice(0,10)}.json`;
+      const jsonStr = JSON.stringify(dataToExport, null, 2);
+      const blob = new Blob([jsonStr], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      alert("Arquivo JSON gerado com sucesso!");
+  };
+
+  const handleImportData = async (event) => {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      if(!window.confirm("ATENÇÃO: A importação irá adicionar os projetos/planos ao seu banco de dados e poderá substituir ou mesclar seu estoque atual. Deseja continuar?")) {
+          if(importFileInputRef.current) importFileInputRef.current.value = '';
+          return;
+      }
+
+      setIsProcessing(true);
+      const reader = new FileReader();
+      
+      reader.onload = async (e) => {
+          try {
+              const data = JSON.parse(e.target.result);
+              
+              // 1. Importar Projetos
+              if (data.projects && Array.isArray(data.projects) && data.projects.length > 0) {
+                  let projCount = 0;
+                  const projectsColl = collection(db, 'users', user.uid, 'projects');
+                  for (const proj of data.projects) {
+                      // Remove o ID original para criar um novo
+                      const { id, ...projData } = proj;
+                      await addDoc(projectsColl, {
+                          ...projData,
+                          name: `[IMP] ${projData.name || 'Projeto'}`,
+                          importedAt: serverTimestamp(),
+                          createdAt: serverTimestamp() // Atualiza data para aparecer no topo
+                      });
+                      projCount++;
+                  }
+                  console.log(`${projCount} projetos importados.`);
+              }
+
+              // 2. Importar Planos
+              if (data.savedPlans && Array.isArray(data.savedPlans) && data.savedPlans.length > 0) {
+                  let planCount = 0;
+                  const plansColl = collection(db, 'users', user.uid, 'cutPlans');
+                  for (const plan of data.savedPlans) {
+                      const { id, ...planData } = plan;
+                      await addDoc(plansColl, {
+                          ...planData,
+                          name: `[IMP] ${planData.name || 'Plano'}`,
+                          importedAt: serverTimestamp(),
+                          createdAt: serverTimestamp()
+                      });
+                      planCount++;
+                  }
+                  console.log(`${planCount} planos importados.`);
+              }
+
+              // 3. Importar Estoque
+              if (data.inventory && Array.isArray(data.inventory) && data.inventory.length > 0) {
+                  const action = window.prompt(
+                      `O arquivo contém ${data.inventory.length} itens de estoque.\n\nDigite 'SUBSTITUIR' para apagar seu estoque atual e usar o do arquivo.\nDigite 'MESCLAR' para adicionar os itens ao seu estoque atual.\nCancelar para ignorar estoque.`, 
+                      "MESCLAR"
+                  );
+
+                  if (action) {
+                      await createInventoryBackup("Antes de Importação JSON");
+                      let finalInventory = [];
+                      
+                      if (action.toUpperCase() === 'SUBSTITUIR') {
+                          finalInventory = data.inventory.map(item => ({...item, id: generateId()}));
+                      } else if (action.toUpperCase() === 'MESCLAR') {
+                          // Lógica simples de mesclagem: adiciona tudo como novos itens para evitar conflito de IDs
+                          const newItems = data.inventory.map(item => ({...item, id: generateId(), source: 'importado_json'}));
+                          finalInventory = [...inventory, ...newItems];
+                      }
+
+                      if (finalInventory.length > 0) {
+                          await updateInventory(finalInventory);
+                      }
+                  }
+              }
+
+              alert("Importação concluída com sucesso!");
+              setShowDataModal(false);
+
+          } catch (error) {
+              console.error("Erro na importação:", error);
+              alert("Erro ao processar o arquivo. Verifique se é um JSON válido.");
+          } finally {
+              setIsProcessing(false);
+              if(importFileInputRef.current) importFileInputRef.current.value = '';
+          }
+      };
+      
+      reader.readAsText(file);
+  };
 
   // --- FUNÇÃO DE ESTRATÉGIA (INTEGRAÇÃO COM O MODAL) ---
   const applyStrategy = (projectsToLoad, mode) => {
@@ -741,6 +867,72 @@ const OtimizadorCorteAco = ({ user }) => {
       {/* OVERLAY DA SIDEBAR */}
       {isSidebarOpen && <div className="fixed inset-0 bg-black/20 z-[50] backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}></div>}
 
+      {/* --- MODAL DE DADOS (EXPORT/IMPORT) --- */}
+      {showDataModal && (
+          <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm px-4">
+              <div className="bg-white rounded-lg shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                  <div className="bg-slate-800 p-4 flex justify-between items-center text-white">
+                      <h3 className="font-bold flex items-center gap-2"><Database size={18}/> Gerenciar Dados</h3>
+                      <button onClick={() => setShowDataModal(false)} className="hover:bg-slate-700 p-1 rounded"><X size={20}/></button>
+                  </div>
+                  
+                  <div className="p-6 space-y-8">
+                      {/* Seção de Exportação */}
+                      <div>
+                          <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2 text-sm uppercase"><Share2 size={16}/> Exportar Dados</h4>
+                          <p className="text-xs text-slate-500 mb-4">Selecione o que deseja salvar em um arquivo JSON para backup ou transferência.</p>
+                          
+                          <div className="space-y-2 mb-4">
+                            <label className="flex items-center gap-2 cursor-pointer p-2 border rounded hover:bg-slate-50">
+                                <input type="checkbox" checked={exportSelection.projects} onChange={e => setExportSelection({...exportSelection, projects: e.target.checked})} className="rounded text-indigo-600 focus:ring-indigo-500" />
+                                <span className="text-sm font-medium">Projetos de Demanda ({projects.length})</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer p-2 border rounded hover:bg-slate-50">
+                                <input type="checkbox" checked={exportSelection.inventory} onChange={e => setExportSelection({...exportSelection, inventory: e.target.checked})} className="rounded text-indigo-600 focus:ring-indigo-500" />
+                                <span className="text-sm font-medium">Estoque de Pontas ({inventory.length})</span>
+                            </label>
+                            <label className="flex items-center gap-2 cursor-pointer p-2 border rounded hover:bg-slate-50">
+                                <input type="checkbox" checked={exportSelection.plans} onChange={e => setExportSelection({...exportSelection, plans: e.target.checked})} className="rounded text-indigo-600 focus:ring-indigo-500" />
+                                <span className="text-sm font-medium">Planos de Corte Salvos ({savedPlans.length})</span>
+                            </label>
+                          </div>
+                          
+                          <button onClick={handleExportData} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2 rounded flex items-center justify-center gap-2 transition-colors">
+                              <Download size={16}/> Baixar Arquivo JSON
+                          </button>
+                      </div>
+
+                      <div className="border-t border-slate-200"></div>
+
+                      {/* Seção de Importação */}
+                      <div>
+                          <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2 text-sm uppercase"><Upload size={16}/> Importar Dados</h4>
+                          <p className="text-xs text-slate-500 mb-4">Carregue um arquivo JSON gerado anteriormente. Os dados serão adicionados à sua conta atual.</p>
+                          
+                          <div className="flex gap-2">
+                              <input 
+                                ref={importFileInputRef}
+                                type="file" 
+                                accept=".json" 
+                                onChange={handleImportData}
+                                className="block w-full text-sm text-slate-500
+                                  file:mr-4 file:py-2 file:px-4
+                                  file:rounded-full file:border-0
+                                  file:text-sm file:font-semibold
+                                  file:bg-indigo-50 file:text-indigo-700
+                                  hover:file:bg-indigo-100 cursor-pointer"
+                              />
+                          </div>
+                          {isProcessing && <p className="text-xs text-indigo-600 mt-2 font-bold animate-pulse">Processando arquivo...</p>}
+                      </div>
+                  </div>
+                  <div className="bg-slate-50 p-3 text-center text-xs text-slate-400 border-t border-slate-100">
+                      Versão do Sistema: 1.0.0
+                  </div>
+              </div>
+          </div>
+      )}
+
       {/* --- MODAL DE EDIÇÃO DO PROJETO (INPUT) --- */}
       {editingProject && (
           <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center backdrop-blur-sm p-4">
@@ -845,7 +1037,13 @@ const OtimizadorCorteAco = ({ user }) => {
       <header className="bg-slate-900 text-white p-4 shadow-lg sticky top-0 z-40">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2">
-            <Settings className="w-6 h-6 text-yellow-500" />
+            <button 
+                onClick={() => setShowDataModal(true)} 
+                title="Configurações e Dados"
+                className="hover:bg-slate-800 p-2 rounded-full transition-colors"
+            >
+                <Settings className="w-6 h-6 text-yellow-500 cursor-pointer hover:rotate-90 transition-transform duration-500" />
+            </button>
             <h1 className="text-xl font-bold tracking-tight hidden sm:block">Otimizador Corte & Dobra</h1>
             <h1 className="text-xl font-bold tracking-tight sm:hidden">Otimizador</h1>
           </div>
