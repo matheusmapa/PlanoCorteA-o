@@ -471,6 +471,13 @@ const OtimizadorCorteAco = ({ user }) => {
 
   const consolidateLeftovers = () => {
     if (!results) return;
+    const usedCounts = {};
+    results.forEach(group => {
+        group.bars.forEach(barGroup => {
+            if (barGroup.type === 'estoque') {
+                barGroup.ids.forEach(id => { usedCounts[id] = (usedCounts[id] || 0) + 1; });
+            }const consolidateLeftovers = () => {
+    if (!results) return;
     
     // --- ADICIONADO: Confirmação antes de salvar ---
     if (!window.confirm("Deseja realmente salvar as sobras deste plano no estoque?")) return;
@@ -507,31 +514,6 @@ const OtimizadorCorteAco = ({ user }) => {
     updateInventory(updatedInventory);
     
     alert(`Estoque atualizado com sucesso!`);
-    setActiveTab('inventory');
-  };
-    
-    // Atualiza quantidades existentes
-    let updatedInventory = inventory.map(item => {
-        if (usedCounts[item.id]) { const newQty = item.qty - usedCounts[item.id]; return { ...item, qty: Math.max(0, newQty) }; }
-        return item;
-    }).filter(item => item.qty > 0);
-
-    // Adiciona novas sobras
-    results.forEach(group => {
-        group.bars.forEach(barGroup => {
-            if (barGroup.remaining > 50) { 
-                const bitola = parseFloat(group.bitola); const length = parseFloat(barGroup.remaining.toFixed(1)); const qtyToAdd = barGroup.count; 
-                const existingIndex = updatedInventory.findIndex(i => Math.abs(i.bitola - bitola) < 0.01 && Math.abs(i.length - length) < 0.1);
-                if (existingIndex !== -1) { updatedInventory[existingIndex].qty += qtyToAdd; } 
-                else { updatedInventory.push({ id: generateId(), bitola, length, qty: qtyToAdd, source: 'sobra_corte' }); }
-            }
-        });
-    });
-
-    // Salva no banco e local
-    updateInventory(updatedInventory);
-    
-    alert(`Estoque atualizado!`);
     setActiveTab('inventory');
   };
 
