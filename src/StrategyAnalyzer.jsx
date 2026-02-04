@@ -1,239 +1,233 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { calculateCutPlan } from './cutOptimizer';
 import { 
   Lightbulb, AlertTriangle, ArrowRight, CheckCircle2, 
-  Scale, Split, Boxes, TrendingUp, DollarSign
+  Scale, Layers, Split, TrendingUp, Package, X, CheckSquare, Square, Calendar
 } from 'lucide-react';
 
-const StrategyAnalyzer = ({ projects, inventory, onLoadProject }) => {
-  const [selectedProjectId, setSelectedProjectId] = useState('');
-  const [analyzing, setAnalyzing] = useState(false);
+const StrategyAnalyzer = ({ projects, onClose, onLoadStrategy }) => {
+  // --- ESTADOS INTERNOS ---
+  const [step, setStep] = useState('select'); // 'select' ou 'analyze'
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [analysis, setAnalysis] = useState(null);
+  const [isComputing, setIsComputing] = useState(false);
 
-  // 1. Encontra o projeto selecionado (O "Urgente")
-  const selectedProject = projects.find(p => p.id === selectedProjectId);
-
-  // 2. Lógica de Simulação Inteligente
-  const analysisResult = useMemo(() => {
-    if (!selectedProject) return null;
-
-    // A) Simula Cenário SOLO (Modo Single)
-    // Nota: Usamos barra padrão de 1200cm para análise pura de eficiência do projeto
-    const soloPlan = calculateCutPlan(selectedProject.items, [], 1200, 0);
-    
-    const calculateMetrics = (results) => {
-      let totalRaw = 0;
-      let totalUsed = 0;
-      let barCount = 0;
-      
-      results.forEach(group => {
-        group.bars.forEach(bar => {
-            barCount += bar.count;
-            totalRaw += (bar.originalLength * bar.count);
-            totalUsed += (bar.cuts.reduce((a, b) => a + b, 0) * bar.count);
-        });
-      });
-      
-      return {
-        efficiency: totalRaw > 0 ? (totalUsed / totalRaw) * 100 : 0,
-        waste: totalRaw - totalUsed,
-        bars: barCount
-      };
-    };
-
-    const soloMetrics = calculateMetrics(soloPlan);
-
-    // B) Simula Cenário MULTI (Procura o "Par Perfeito")
-    let bestPartner = null;
-    let bestCombinedMetrics = null;
-
-    // Filtra outros projetos que não sejam o selecionado
-    const otherProjects = projects.filter(p => p.id !== selectedProject.id);
-
-    otherProjects.forEach(partner => {
-        // Combina os itens (Adiciona prefixo para rastrear origem se necessário, mas aqui é só simulação)
-        const combinedItems = [...selectedProject.items, ...partner.items];
-        const combinedPlan = calculateCutPlan(combinedItems, [], 1200, 0);
-        const combinedMetrics = calculateMetrics(combinedPlan);
-
-        // Se a eficiência melhorou significativamente (> 3%), é um candidato
-        if (combinedMetrics.efficiency > soloMetrics.efficiency + 1) {
-            // Se ainda não temos um melhor, ou se este é melhor que o anterior
-            if (!bestCombinedMetrics || combinedMetrics.efficiency > bestCombinedMetrics.efficiency) {
-                bestPartner = partner;
-                bestCombinedMetrics = combinedMetrics;
-            }
-        }
-    });
-
-    return {
-        solo: soloMetrics,
-        partner: bestPartner,
-        combined: bestCombinedMetrics
-    };
-  }, [selectedProject, projects]);
-
-  const handleLoadStrategy = (mode) => {
-      if (mode === 'solo') {
-          onLoadProject([selectedProject]);
-      } else if (mode === 'multi' && analysisResult.partner) {
-          onLoadProject([selectedProject, analysisResult.partner]);
-      }
+  // --- PASSO 1: SELEÇÃO ---
+  const toggleSelection = (id) => {
+    setSelectedIds(prev => 
+      prev.includes(id) ? prev.filter(pid => pid !== id) : [...prev, id]
+    );
   };
 
-  if (projects.length === 0) {
-      return (
-        <div className="p-8 text-center text-slate-400 border-2 border-dashed border-slate-200 rounded-xl">
-            <Lightbulb className="w-12 h-12 mx-auto mb-3 opacity-50" />
-            <p>Salve alguns projetos na aba lateral para começar a usar a Inteligência de Estratégia.</p>
-        </div>
-      );
-  }
+  const handleAnalyze = () => {
+    if (selectedIds.length < 2) return;
+    setStep('analyze');
+  };
 
-  return (
-    <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+  // --- PASSO 2: CÁLCULO (Igual ao anterior, mas roda quando entra no step 'analyze') ---
+  useEffect(() => {
+    if (step !== 'analyze') return;
+    
+    setIsComputing(true);
+    const selectedProjects = projects.filter(p => selectedIds.includes(p.id));
+
+    setTimeout(() => {
+      // 1. CENÁRIO CONSERVADOR (SEPARADOS)
+      let separateMetrics = { totalBars: 0, totalWaste: 0, rawLength: 0, usedLength: 0 };
+
+      selectedProjects.forEach(proj => {
+        const plan = calculateCutPlan(proj.items, [], 1200, 0); 
+        plan.forEach(group => {
+            group.bars.forEach(bar => {
+                const cutsLen = bar.cuts.reduce((a, b) => a + b, 0);
+                separateMetrics.totalBars += bar.count;
+                separateMetrics.rawLength += (bar.originalLength * bar.count);
+                separateMetrics.usedLength += (cutsLen * bar.count);
+                if (bar.remaining < 100) separateMetrics.totalWaste += (bar.remaining * bar.count);
+            });
+        });
+      });
+
+      // 2. CENÁRIO OUSADO (MISTURADOS)
+      const allItems = selectedProjects.flatMap(p => p.items.map(i => ({...i, origin: p.name})));
+      const combinedPlan = calculateCutPlan(allItems, [], 1200, 0);
+
+      let combinedMetrics = { totalBars: 0, totalWaste: 0, rawLength: 0, usedLength: 0 };
+
+      combinedPlan.forEach(group => {
+          group.bars.forEach(bar => {
+              const cutsLen = bar.cuts.reduce((a, b) => a + b, 0);
+              combinedMetrics.totalBars += bar.count;
+              combinedMetrics.rawLength += (bar.originalLength * bar.count);
+              combinedMetrics.usedLength += (cutsLen * bar.count);
+              if (bar.remaining < 100) combinedMetrics.totalWaste += (bar.remaining * bar.count);
+          });
+      });
+
+      // 3. CÁLCULO DOS VENCEDORES
+      const separateEfficiency = (separateMetrics.usedLength / separateMetrics.rawLength) * 100;
+      const combinedEfficiency = (combinedMetrics.usedLength / combinedMetrics.rawLength) * 100;
       
-      {/* SELEÇÃO DO PROJETO "PIVÔ" */}
-      <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
-        <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2 mb-4">
-            <Lightbulb className="text-amber-500" /> Analisador de Estratégia
-        </h2>
+      const barsSaved = separateMetrics.totalBars - combinedMetrics.totalBars;
+      const efficiencyGain = combinedEfficiency - separateEfficiency;
+      const recommendation = (efficiencyGain > 1.5 || barsSaved > 0) ? 'combined' : 'separate';
+
+      setAnalysis({
+        separate: { ...separateMetrics, efficiency: separateEfficiency },
+        combined: { ...combinedMetrics, efficiency: combinedEfficiency },
+        diff: { barsSaved, efficiencyGain },
+        recommendation
+      });
+
+      setIsComputing(false);
+    }, 300);
+
+  }, [step, selectedIds, projects]);
+
+  // --- RENDERIZAÇÃO: MODAL WRAPPER ---
+  return (
+    <div className="fixed inset-0 bg-black/60 z-[80] flex items-center justify-center backdrop-blur-sm p-4 animate-in fade-in duration-200">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         
-        <label className="block text-sm font-medium text-slate-600 mb-2">Qual projeto você precisa entregar <span className="text-red-500 font-bold">HOJE</span>?</label>
-        <select 
-            value={selectedProjectId} 
-            onChange={(e) => setSelectedProjectId(e.target.value)}
-            className="w-full p-3 border border-slate-300 rounded-lg text-lg focus:ring-2 focus:ring-indigo-500 outline-none shadow-sm"
-        >
-            <option value="">Selecione um projeto da fila...</option>
-            {projects.map(p => (
-                <option key={p.id} value={p.id}>
-                    {p.name} ({p.items.length} peças) - {p.createdAt?.toDate().toLocaleDateString()}
-                </option>
-            ))}
-        </select>
-      </div>
-
-      {selectedProject && analysisResult && (
-        <div className="grid md:grid-cols-2 gap-6">
-            
-            {/* CARD 1: MODO SINGLE (PADRÃO) */}
-            <div className={`relative p-6 rounded-xl border-2 transition-all ${
-                analysisResult.solo.efficiency >= 92 
-                ? 'border-green-500 bg-green-50/50 shadow-md ring-1 ring-green-500' 
-                : 'border-slate-200 bg-white hover:border-slate-300'
-            }`}>
-                {analysisResult.solo.efficiency >= 92 && (
-                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-green-600 text-white px-3 py-1 rounded-full text-xs font-bold shadow-sm flex items-center gap-1">
-                        <CheckCircle2 size={12}/> RECOMENDADO
-                    </div>
-                )}
-
-                <div className="flex justify-between items-start mb-4">
-                    <div>
-                        <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                            <Split className="text-blue-500" size={20}/> Modo Single
-                        </h3>
-                        <p className="text-xs text-slate-500 mt-1">Rodar apenas "{selectedProject.name}"</p>
-                    </div>
-                    <div className="text-right">
-                        <span className="block text-3xl font-black text-slate-800">{analysisResult.solo.efficiency.toFixed(1)}%</span>
-                        <span className="text-xs font-bold text-slate-400 uppercase">Eficiência</span>
-                    </div>
-                </div>
-
-                <ul className="space-y-3 mb-6">
-                    <li className="flex items-start gap-2 text-sm text-slate-600">
-                        <CheckCircle2 className="text-green-500 mt-0.5" size={16}/>
-                        <span><strong className="text-slate-800">Logística Simples:</strong> Sem mistura de peças. Risco zero de entregar errado.</span>
-                    </li>
-                    <li className="flex items-start gap-2 text-sm text-slate-600">
-                        <CheckCircle2 className="text-green-500 mt-0.5" size={16}/>
-                        <span><strong className="text-slate-800">Cobrança Justa:</strong> O cliente paga exatamente pela perda que gerou.</span>
-                    </li>
-                    {analysisResult.solo.efficiency < 85 && (
-                        <li className="flex items-start gap-2 text-sm text-amber-600 bg-amber-50 p-2 rounded">
-                            <AlertTriangle className="mt-0.5 shrink-0" size={16}/>
-                            <span>Atenção: Eficiência baixa. Muita sucata será gerada. Considere combinar.</span>
-                        </li>
-                    )}
-                </ul>
-
-                <button 
-                    onClick={() => handleLoadStrategy('solo')}
-                    className="w-full py-3 rounded-lg font-bold text-slate-700 bg-white border border-slate-300 hover:bg-slate-50 hover:text-indigo-600 transition-colors flex items-center justify-center gap-2"
-                >
-                    Carregar Solo <ArrowRight size={16}/>
-                </button>
-            </div>
-
-            {/* CARD 2: MODO MULTI (OTIMIZADO) */}
-            <div className={`relative p-6 rounded-xl border-2 transition-all ${
-                analysisResult.partner && analysisResult.combined.efficiency > analysisResult.solo.efficiency + 3 
-                ? 'border-indigo-500 bg-indigo-50/50 shadow-md ring-1 ring-indigo-500' 
-                : 'border-slate-200 bg-slate-50 opacity-80'
-            }`}>
-                {analysisResult.partner && analysisResult.combined.efficiency > analysisResult.solo.efficiency + 3 && (
-                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-indigo-600 text-white px-3 py-1 rounded-full text-xs font-bold shadow-sm flex items-center gap-1">
-                        <TrendingUp size={12}/> GRANDE ECONOMIA
-                    </div>
-                )}
-
-                <div className="flex justify-between items-start mb-4">
-                    <div>
-                        <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                            <Boxes className="text-indigo-500" size={20}/> Modo Multi
-                        </h3>
-                        {analysisResult.partner ? (
-                            <p className="text-xs text-slate-500 mt-1">Combinar com "{analysisResult.partner.name}"</p>
-                        ) : (
-                            <p className="text-xs text-slate-400 mt-1">Nenhum parceiro ideal encontrado</p>
-                        )}
-                    </div>
-                    <div className="text-right">
-                        {analysisResult.combined ? (
-                            <>
-                                <span className="block text-3xl font-black text-indigo-700">{analysisResult.combined.efficiency.toFixed(1)}%</span>
-                                <span className="text-xs font-bold text-green-600 flex justify-end items-center gap-1">
-                                    <TrendingUp size={10}/> +{(analysisResult.combined.efficiency - analysisResult.solo.efficiency).toFixed(1)}%
-                                </span>
-                            </>
-                        ) : (
-                            <span className="block text-3xl font-black text-slate-300">--%</span>
-                        )}
-                    </div>
-                </div>
-
-                {analysisResult.partner ? (
-                    <ul className="space-y-3 mb-6">
-                        <li className="flex items-start gap-2 text-sm text-slate-600">
-                            <CheckCircle2 className="text-green-500 mt-0.5" size={16}/>
-                            <span><strong className="text-slate-800">Redução de Sucata:</strong> Otimiza as sobras do Projeto A com peças do B.</span>
-                        </li>
-                        <li className="flex items-start gap-2 text-sm text-amber-600 bg-amber-50 p-2 rounded border border-amber-100">
-                            <AlertTriangle className="mt-0.5 shrink-0" size={16}/>
-                            <span><strong className="text-amber-700">Alerta de Logística:</strong> "Salada Mista". Exige separação manual rigorosa após o corte.</span>
-                        </li>
-                        <li className="flex items-start gap-2 text-sm text-slate-500">
-                            <DollarSign className="text-slate-400 mt-0.5" size={16}/>
-                            <span>Ideal se ambos os clientes aceitarem dividir o lucro da otimização.</span>
-                        </li>
-                    </ul>
-                ) : (
-                    <div className="py-8 text-center text-slate-400 text-sm">
-                        Não encontramos outro projeto na fila que melhore significativamente a eficiência deste.
-                    </div>
-                )}
-
-                <button 
-                    onClick={() => handleLoadStrategy('multi')}
-                    disabled={!analysisResult.partner}
-                    className="w-full py-3 rounded-lg font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2 shadow-sm"
-                >
-                    Carregar Combinado <ArrowRight size={16}/>
-                </button>
-            </div>
+        {/* HEADER DO MODAL */}
+        <div className="bg-slate-900 text-white p-4 flex justify-between items-center shrink-0">
+            <h2 className="text-lg font-bold flex items-center gap-2">
+                <Lightbulb className="text-amber-400" /> Analisador de Estratégia
+            </h2>
+            <button onClick={onClose} className="hover:bg-white/10 p-1 rounded transition-colors"><X size={20}/></button>
         </div>
-      )}
+
+        {/* CONTEÚDO */}
+        <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
+            
+            {/* TELA 1: SELEÇÃO */}
+            {step === 'select' && (
+                <div className="space-y-4">
+                    <div className="text-center mb-6">
+                        <h3 className="text-xl font-bold text-slate-800">Quais projetos vamos analisar?</h3>
+                        <p className="text-slate-500 text-sm">Selecione pelo menos 2 projetos da lista abaixo para comparar cenários.</p>
+                    </div>
+
+                    <div className="grid sm:grid-cols-2 gap-3">
+                        {projects.length === 0 && <p className="text-slate-400 col-span-2 text-center py-8">Nenhum projeto salvo no histórico.</p>}
+                        
+                        {projects.map(proj => {
+                            const isSelected = selectedIds.includes(proj.id);
+                            return (
+                                <div 
+                                    key={proj.id} 
+                                    onClick={() => toggleSelection(proj.id)}
+                                    className={`p-4 rounded-lg border cursor-pointer transition-all flex items-start gap-3 hover:shadow-md ${isSelected ? 'bg-indigo-50 border-indigo-500 ring-1 ring-indigo-500' : 'bg-white border-slate-200 hover:border-indigo-300'}`}
+                                >
+                                    <div className={isSelected ? "text-indigo-600" : "text-slate-300"}>
+                                        {isSelected ? <CheckSquare size={20} /> : <Square size={20} />}
+                                    </div>
+                                    <div>
+                                        <div className="font-bold text-slate-800 text-sm">{proj.name}</div>
+                                        <div className="text-xs text-slate-500 flex items-center gap-1 mt-1">
+                                            <Calendar size={12}/> {proj.createdAt?.toDate().toLocaleDateString()} • {proj.items.length} peças
+                                        </div>
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                </div>
+            )}
+
+            {/* TELA 2: LOADING & RESULTADOS */}
+            {step === 'analyze' && (
+                <div className="h-full">
+                    {isComputing ? (
+                         <div className="flex flex-col items-center justify-center h-64">
+                            <Layers className="w-16 h-16 text-indigo-500 animate-bounce mb-4" />
+                            <p className="text-indigo-900 font-bold animate-pulse text-lg">Simulando combinações...</p>
+                            <p className="text-slate-500 text-sm">Calculando eficiência logística vs. material</p>
+                        </div>
+                    ) : analysis ? (
+                        <div className="space-y-6 animate-in slide-in-from-right-8 duration-300">
+                             <div className="flex justify-between items-center mb-4">
+                                <button onClick={() => setStep('select')} className="text-sm text-slate-500 hover:text-indigo-600 flex items-center gap-1">
+                                    <ArrowRight className="rotate-180" size={14}/> Voltar para seleção
+                                </button>
+                                {analysis.recommendation === 'combined' 
+                                    ? <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-xs font-bold border border-green-200">SUGESTÃO: MISTURAR</span>
+                                    : <span className="bg-blue-100 text-blue-800 px-3 py-1 rounded-full text-xs font-bold border border-blue-200">SUGESTÃO: SEPARAR</span>
+                                }
+                             </div>
+
+                             <div className="grid md:grid-cols-2 gap-6">
+                                {/* CARD SEPARADOS */}
+                                <div className={`p-5 rounded-xl border-2 flex flex-col ${analysis.recommendation === 'separate' ? 'border-blue-500 bg-blue-50/50' : 'border-slate-200 bg-white opacity-70'}`}>
+                                    <div className="flex items-center gap-2 mb-3 text-blue-700 font-bold"><Split size={20}/> Estratégia: Separados</div>
+                                    <div className="space-y-2 text-sm flex-1">
+                                        <div className="flex justify-between"><span>Total Barras:</span> <strong>{analysis.separate.totalBars}</strong></div>
+                                        <div className="flex justify-between"><span>Eficiência:</span> <strong>{analysis.separate.efficiency.toFixed(1)}%</strong></div>
+                                        <div className="flex justify-between"><span>Sucata:</span> <strong className="text-red-500">{(analysis.separate.totalWaste/100).toFixed(1)}m</strong></div>
+                                    </div>
+                                    <button 
+                                        onClick={() => { onLoadStrategy(projects.filter(p => selectedIds.includes(p.id)), 'separate'); onClose(); }}
+                                        className="mt-4 w-full py-2 bg-white border border-slate-300 text-slate-700 font-bold rounded hover:bg-slate-50"
+                                    >
+                                        Carregar Separados
+                                    </button>
+                                </div>
+
+                                {/* CARD COMBINADOS */}
+                                <div className={`p-5 rounded-xl border-2 flex flex-col ${analysis.recommendation === 'combined' ? 'border-green-500 bg-green-50/50' : 'border-slate-200 bg-white opacity-70'}`}>
+                                    <div className="flex items-center gap-2 mb-3 text-green-700 font-bold"><Layers size={20}/> Estratégia: Unificados</div>
+                                    <div className="space-y-2 text-sm flex-1">
+                                        <div className="flex justify-between">
+                                            <span>Total Barras:</span> 
+                                            <div>
+                                                <strong>{analysis.combined.totalBars}</strong>
+                                                {analysis.diff.barsSaved > 0 && <span className="text-xs text-green-600 ml-1">(-{analysis.diff.barsSaved})</span>}
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-between">
+                                            <span>Eficiência:</span> 
+                                            <div>
+                                                <strong>{analysis.combined.efficiency.toFixed(1)}%</strong>
+                                                <span className="text-xs text-green-600 ml-1">(+{analysis.diff.efficiencyGain.toFixed(1)}%)</span>
+                                            </div>
+                                        </div>
+                                        <div className="flex justify-between"><span>Sucata:</span> <strong className="text-green-600">{(analysis.combined.totalWaste/100).toFixed(1)}m</strong></div>
+                                    </div>
+                                    <button 
+                                        onClick={() => { onLoadStrategy(projects.filter(p => selectedIds.includes(p.id)), 'combined'); onClose(); }}
+                                        className="mt-4 w-full py-2 bg-green-600 text-white font-bold rounded hover:bg-green-700 shadow-sm"
+                                    >
+                                        Unificar e Carregar
+                                    </button>
+                                </div>
+                             </div>
+
+                             {analysis.recommendation === 'combined' && (
+                                 <div className="bg-amber-50 p-3 rounded border border-amber-200 text-xs text-amber-800 flex gap-2">
+                                     <AlertTriangle size={16} className="shrink-0"/>
+                                     <p><strong>Atenção:</strong> Ao unificar, você economiza <strong>{analysis.diff.barsSaved} barras</strong>, mas aumenta a complexidade logística. Use etiquetas coloridas na separação.</p>
+                                 </div>
+                             )}
+                        </div>
+                    ) : null}
+                </div>
+            )}
+        </div>
+
+        {/* FOOTER: BOTÃO DE AÇÃO (SÓ NO STEP SELECT) */}
+        {step === 'select' && (
+            <div className="p-4 border-t bg-white flex justify-end gap-3">
+                <button onClick={onClose} className="px-4 py-2 text-slate-500 hover:text-slate-800">Cancelar</button>
+                <button 
+                    onClick={handleAnalyze} 
+                    disabled={selectedIds.length < 2}
+                    className="px-6 py-2 bg-indigo-600 text-white font-bold rounded-lg hover:bg-indigo-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors shadow-sm"
+                >
+                    Analisar {selectedIds.length} Projetos
+                </button>
+            </div>
+        )}
+      </div>
     </div>
   );
 };
