@@ -793,6 +793,28 @@ const OtimizadorCorteAco = ({ user }) => {
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans relative overflow-x-hidden">
       
       {/* --- SIDEBAR LATERAL (MEUS ARQUIVOS) --- */}
+<div className={`fixed inset-y-0 right-0 w-80 bg-white shadow-2xl z-[60] transform transition-transform duration-300 ease-in-out border-l border-slate-200 flex flex-col ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+    <div className="p-4 bg-indigo-900 text-white flex justify-between items-center shadow-md shrink-0">
+        <h2 className="font-bold flex items-center gap-2"><FolderHeart size={20} /> Meus Arquivos</h2>
+        <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-indigo-700 p-1 rounded"><X size={20}/></button>
+    </div>
+    
+    {/* --- ADICIONE ESSE BLOCO AQUI --- */}
+    <div className="p-4 bg-indigo-50 border-b border-indigo-100">
+        <button 
+            onClick={() => {
+                setShowDataModal(true);
+                setIsSidebarOpen(false); // Fecha a sidebar ao abrir o modal
+            }}
+            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded shadow flex items-center justify-center gap-2 font-bold transition-colors"
+        >
+            <Database size={18} /> Importar / Exportar JSON
+        </button>
+        <p className="text-[10px] text-center text-indigo-400 mt-1">Backup completo dos dados</p>
+    </div>
+    {/* ------------------------------- */}
+
+    <div className="flex-1 overflow-y-auto p-4 space-y-6 bg-slate-50">
       <div className={`fixed inset-y-0 right-0 w-80 bg-white shadow-2xl z-[60] transform transition-transform duration-300 ease-in-out border-l border-slate-200 flex flex-col ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'}`}>
           <div className="p-4 bg-indigo-900 text-white flex justify-between items-center shadow-md shrink-0">
               <h2 className="font-bold flex items-center gap-2"><FolderHeart size={20} /> Meus Arquivos</h2>
