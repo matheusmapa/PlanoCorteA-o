@@ -1034,20 +1034,29 @@ const OtimizadorCorteAco = ({ user }) => {
         />
     )}
 
-      <header className="bg-slate-900 text-white p-4 shadow-lg sticky top-0 z-40">
+     <header className="bg-slate-900 text-white p-4 shadow-lg sticky top-0 z-40">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
+          
+          {/* LADO ESQUERDO: LOGO APENAS (VOLTOU AO NORMAL) */}
           <div className="flex items-center gap-2">
-            <button 
-                onClick={() => setShowDataModal(true)} 
-                title="Configurações e Dados"
-                className="hover:bg-slate-800 p-2 rounded-full transition-colors"
-            >
-                <Settings className="w-6 h-6 text-yellow-500 cursor-pointer hover:rotate-90 transition-transform duration-500" />
-            </button>
+            <Settings className="w-6 h-6 text-yellow-500" /> {/* Apenas ícone decorativo */}
             <h1 className="text-xl font-bold tracking-tight hidden sm:block">Otimizador Corte & Dobra</h1>
             <h1 className="text-xl font-bold tracking-tight sm:hidden">Otimizador</h1>
           </div>
+
+          {/* LADO DIREITO: AÇÕES */}
           <div className="flex items-center gap-3">
+            
+            {/* --- NOVO BOTÃO DE DADOS (ANTES DE MEUS ARQUIVOS) --- */}
+            <button 
+                onClick={() => setShowDataModal(true)}
+                className="flex items-center gap-1 text-sm bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-md transition-colors shadow-sm border border-slate-600"
+                title="Importar/Exportar Dados (Backup)"
+            >
+                <Database size={16} /> <span className="hidden sm:inline">Dados</span>
+            </button>
+
+            {/* BOTÃO MEUS ARQUIVOS (JÁ EXISTIA) */}
             <button 
                 onClick={() => setIsSidebarOpen(true)}
                 className="flex items-center gap-1 text-sm bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-md transition-colors shadow-sm border border-indigo-600"
@@ -1055,6 +1064,7 @@ const OtimizadorCorteAco = ({ user }) => {
                 <FolderHeart size={16} /> <span className="hidden sm:inline">Meus Arquivos</span>
             </button>
 
+            {/* INFO DO USUÁRIO E LOGOUT */}
             <div className="hidden md:flex items-center gap-2 text-sm text-slate-400 border-l border-slate-700 pl-3">
                 <User size={14} />
                 <span className="max-w-[150px] truncate">{user.email}</span>
