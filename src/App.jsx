@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Trash2, Plus, Download, Clipboard, Save, RefreshCw, FileText, Settings, Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, FolderUp, X, Eraser, LogOut, User, Menu, FolderHeart, Calendar, Edit3, Check } from 'lucide-react';
+import { Trash2, Plus, Download, Clipboard, Save, RefreshCw, FileText, Settings, Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, FolderUp, X, Eraser, LogOut, User, Menu, FolderHeart, Calendar, Edit3, Check, History, RotateCcw } from 'lucide-react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-// ADICIONADO: setDoc para salvar documentos com ID específico
-import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, setDoc } from 'firebase/firestore';
+// ADICIONADO: getDocs, writeBatch para gerenciar os backups em lote
+import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, setDoc, getDocs, writeBatch } from 'firebase/firestore';
 
 // Lógica externa
 import { extractTextFromPDF, parseTextToItems, BITOLAS_COMERCIAIS, generateId } from './pdfProcessor';
@@ -29,6 +29,10 @@ const OtimizadorCorteAco = ({ user }) => {
   const [projects, setProjects] = useState([]); // INPUT (Projetos salvos)
   const [savedPlans, setSavedPlans] = useState([]); // OUTPUT (Planos de corte salvos)
   
+  // --- Estados de Backup ---
+  const [showBackupModal, setShowBackupModal] = useState(false);
+  const [backupsList, setBackupsList] = useState([]);
+
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [editingProject, setEditingProject] = useState(null); // Projeto sendo editado no modal
   
@@ -45,6 +49,7 @@ const OtimizadorCorteAco = ({ user }) => {
 
   const BARRA_PADRAO = 1200;
   const PERDA_CORTE = 0;
+  const MAX_BACKUPS = 5; // Limite de backups no histórico
 
   // --- Inicialização e Banco de Dados ---
   useEffect(() => {
@@ -110,15 +115,13 @@ const OtimizadorCorteAco = ({ user }) => {
             setSavedPlans(plansData);
         });
 
-        // C) ESTOQUE DE PONTAS (NOVO) - Escuta o documento único de estoque
+        // C) ESTOQUE DE PONTAS
         const inventoryDocRef = doc(db, 'users', user.uid, 'appData', 'inventory');
         const unsubscribeInventory = onSnapshot(inventoryDocRef, (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 if (data.items && Array.isArray(data.items)) {
-                    // Atualiza o estado com o que veio do banco
                     setInventory(data.items);
-                    // Atualiza o local storage também para manter sincronia
                     localStorage.setItem('estoquePontas', JSON.stringify(data.items));
                 }
             }
@@ -135,26 +138,73 @@ const OtimizadorCorteAco = ({ user }) => {
     return cleanupScripts;
   }, [user]);
 
-  // --- NOVA FUNÇÃO: Atualizar Estoque (Local + Banco) ---
-  const updateInventory = async (newInv) => {
-    // 1. Atualiza visualmente na hora (Optimistic UI)
-    setInventory(newInv);
-    
-    // 2. Salva no LocalStorage (Backup)
-    localStorage.setItem('estoquePontas', JSON.stringify(newInv));
+  // --- NOVA FUNÇÃO DE BACKUP INTELIGENTE ---
+  const createInventoryBackup = async (reason) => {
+    if (!user) return;
+    try {
+        const backupsRef = collection(db, 'users', user.uid, 'inventoryBackups');
+        
+        // 1. Cria o backup atual
+        await addDoc(backupsRef, {
+            items: inventory, // Salva o estado ATUAL antes de modificar
+            reason: reason,
+            createdAt: serverTimestamp()
+        });
 
-    // 3. Salva no Firestore
+        // 2. Limpeza: Mantém apenas os últimos X backups
+        const q = query(backupsRef, orderBy('createdAt', 'desc'));
+        const snapshot = await getDocs(q);
+        
+        if (snapshot.docs.length > MAX_BACKUPS) {
+            const batch = writeBatch(db);
+            // Pega todos os docs a partir do índice MAX_BACKUPS e marca para deletar
+            snapshot.docs.slice(MAX_BACKUPS).forEach(doc => {
+                batch.delete(doc.ref);
+            });
+            await batch.commit();
+            console.log("Limpeza de backups antigos realizada.");
+        }
+    } catch (error) {
+        console.error("Erro ao criar backup:", error);
+    }
+  };
+
+  const fetchBackups = async () => {
+      if (!user) return;
+      setIsProcessing(true);
+      try {
+          const q = query(collection(db, 'users', user.uid, 'inventoryBackups'), orderBy('createdAt', 'desc'));
+          const snapshot = await getDocs(q);
+          const backups = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          setBackupsList(backups);
+          setShowBackupModal(true);
+      } catch (error) {
+          alert("Erro ao buscar histórico.");
+      } finally {
+          setIsProcessing(false);
+      }
+  };
+
+  const restoreBackup = async (backupItem) => {
+      if(window.confirm(`Restaurar o estoque para o estado de "${backupItem.reason}"?\nIsso substituirá o estoque atual.`)) {
+          await updateInventory(backupItem.items);
+          setShowBackupModal(false);
+          alert("Estoque restaurado com sucesso!");
+      }
+  };
+
+  // --- Função Atualizar Estoque (Local + Banco) ---
+  const updateInventory = async (newInv) => {
+    setInventory(newInv);
+    localStorage.setItem('estoquePontas', JSON.stringify(newInv));
     if (user) {
         try {
-            // Usamos setDoc com { merge: true } ou sobrescrevemos. 
-            // Vamos salvar num documento fixo chamado 'inventory' dentro de uma coleção 'appData'
             await setDoc(doc(db, 'users', user.uid, 'appData', 'inventory'), {
                 items: newInv,
                 updatedAt: serverTimestamp()
             });
         } catch (error) {
             console.error("Erro ao salvar estoque no banco:", error);
-            // Opcional: Mostrar um toast de erro
         }
     }
   };
@@ -162,10 +212,8 @@ const OtimizadorCorteAco = ({ user }) => {
   // --- Funções: Planos de Corte (Output) ---
   const handleSaveCutPlan = async () => {
       if (!results) return alert("Não há resultado gerado para salvar.");
-      
       const planName = window.prompt("Nome para este Plano de Corte (ex: Lote A - 03/02):");
       if (!planName) return;
-
       try {
           await addDoc(collection(db, 'users', user.uid, 'cutPlans'), {
               name: planName,
@@ -203,10 +251,8 @@ const OtimizadorCorteAco = ({ user }) => {
   // --- Funções: Projetos de Demanda (Input) ---
   const handleSaveProject = async () => {
       if (items.length === 0) return alert("A lista de corte está vazia. Nada para salvar.");
-      
       const projectName = window.prompt("Nome do Projeto (ex: Obra Residencial Silva):");
       if (!projectName) return;
-
       try {
           await addDoc(collection(db, 'users', user.uid, 'projects'), {
               name: projectName,
@@ -393,33 +439,30 @@ const OtimizadorCorteAco = ({ user }) => {
 
   const updateInventoryItem = (id, field, value) => {
     const newInv = inventory.map(item => item.id === id ? { ...item, [field]: value } : item);
-    // USANDO A NOVA FUNÇÃO
     updateInventory(newInv);
   };
 
   const removeInventoryItem = (id) => {
-    // USANDO A NOVA FUNÇÃO
     updateInventory(inventory.filter(item => item.id !== id));
   };
 
-  const clearInventory = () => {
+  const clearInventory = async () => {
       if(window.confirm("Tem certeza que deseja APAGAR TODO o estoque de pontas?")) {
-          // USANDO A NOVA FUNÇÃO
+          // BACKUP ANTES DE LIMPAR
+          await createInventoryBackup("Antes de Limpar Tudo");
           updateInventory([]);
       }
   }
 
-  // --- OTIMIZAÇÃO (MODIFICADA PARA USAR O ESTADO) ---
+  // --- OTIMIZAÇÃO ---
   const runOptimization = () => {
     const itemsToCut = filteredItems.filter(item => item.selected);
     if (itemsToCut.length === 0) return alert("Nenhum item válido para cortar.");
     setIsProcessing(true);
     setTimeout(() => {
         try {
-            // SE A CHAVE ESTIVER LIGADA, USA O INVENTORY. SE NÃO, USA ARRAY VAZIO.
             const inventoryToUse = useLeftovers ? inventory : [];
             const finalResult = calculateCutPlan(itemsToCut, inventoryToUse, BARRA_PADRAO, PERDA_CORTE);
-            
             setResults(finalResult);
             setActiveTab('results');
             setActiveResultsBitola('todas');
@@ -469,12 +512,14 @@ const OtimizadorCorteAco = ({ user }) => {
     doc.save(`Plano_Corte_${new Date().toISOString().slice(0,10)}.pdf`);
   };
 
-  const consolidateLeftovers = () => {
+  const consolidateLeftovers = async () => {
     if (!results) return;
     
-    // --- ADICIONADO: Confirmação antes de salvar ---
+    // Confirmação
     if (!window.confirm("Deseja realmente salvar as sobras deste plano no estoque?")) return;
-    // -----------------------------------------------
+
+    // BACKUP ANTES DE MODIFICAR
+    await createInventoryBackup("Antes de Consolidar Sobras");
 
     const usedCounts = {};
     results.forEach(group => {
@@ -485,13 +530,11 @@ const OtimizadorCorteAco = ({ user }) => {
         });
     });
     
-    // Atualiza quantidades existentes
     let updatedInventory = inventory.map(item => {
         if (usedCounts[item.id]) { const newQty = item.qty - usedCounts[item.id]; return { ...item, qty: Math.max(0, newQty) }; }
         return item;
     }).filter(item => item.qty > 0);
 
-    // Adiciona novas sobras
     results.forEach(group => {
         group.bars.forEach(barGroup => {
             if (barGroup.remaining > 50) { 
@@ -503,39 +546,32 @@ const OtimizadorCorteAco = ({ user }) => {
         });
     });
 
-    // Salva no banco e local
     updateInventory(updatedInventory);
-    
-    alert(`Estoque atualizado com sucesso!`);
+    alert(`Estoque atualizado e backup criado!`);
     setActiveTab('inventory');
   };
 
-  // --- NOVA FUNÇÃO: EXECUTAR PROJETO (INTEGRADA) ---
+  // --- EXECUTAR PROJETO (INTEGRADA) ---
   const handleExecuteProject = async () => {
     if (!results) return;
 
-    // 1. Calcular o consumo do estoque (BAIXA)
     const usedCounts = {};
     let usedStockCount = 0;
-
     results.forEach(group => {
         group.bars.forEach(barGroup => {
             if (barGroup.type === 'estoque') {
                 usedStockCount += barGroup.count;
-                barGroup.ids.forEach(id => { 
-                    usedCounts[id] = (usedCounts[id] || 0) + 1; 
-                });
+                barGroup.ids.forEach(id => { usedCounts[id] = (usedCounts[id] || 0) + 1; });
             }
         });
     });
 
-    // 2. Confirmações
     if (!window.confirm(`Deseja realmente dar baixa em ${usedStockCount} itens de estoque e finalizar este corte?`)) return;
-    
     const saveNewLeftovers = window.confirm("Gostaria de salvar as pontas restantes (sobras) no estoque?");
 
-    // 3. Processar Estoque
-    // A) Baixa dos usados
+    // BACKUP ANTES DE MODIFICAR
+    await createInventoryBackup("Antes de Executar Projeto");
+
     let updatedInventory = inventory.map(item => {
         if (usedCounts[item.id]) { 
             const newQty = item.qty - usedCounts[item.id]; 
@@ -544,7 +580,6 @@ const OtimizadorCorteAco = ({ user }) => {
         return item;
     }).filter(item => item.qty > 0);
 
-    // B) Entrada das sobras (se confirmado)
     if (saveNewLeftovers) {
         results.forEach(group => {
             group.bars.forEach(barGroup => {
@@ -552,29 +587,14 @@ const OtimizadorCorteAco = ({ user }) => {
                     const bitola = parseFloat(group.bitola); 
                     const length = parseFloat(barGroup.remaining.toFixed(1)); 
                     const qtyToAdd = barGroup.count; 
-                    
-                    const existingIndex = updatedInventory.findIndex(i => 
-                        Math.abs(i.bitola - bitola) < 0.01 && 
-                        Math.abs(i.length - length) < 0.1
-                    );
-
-                    if (existingIndex !== -1) { 
-                        updatedInventory[existingIndex].qty += qtyToAdd; 
-                    } else { 
-                        updatedInventory.push({ 
-                            id: generateId(), 
-                            bitola, 
-                            length, 
-                            qty: qtyToAdd, 
-                            source: 'sobra_projeto' 
-                        }); 
-                    }
+                    const existingIndex = updatedInventory.findIndex(i => Math.abs(i.bitola - bitola) < 0.01 && Math.abs(i.length - length) < 0.1);
+                    if (existingIndex !== -1) { updatedInventory[existingIndex].qty += qtyToAdd; } 
+                    else { updatedInventory.push({ id: generateId(), bitola, length, qty: qtyToAdd, source: 'sobra_projeto' }); }
                 }
             });
         });
     }
 
-    // 4. Salvar
     await updateInventory(updatedInventory);
     alert("Projeto executado e estoque atualizado!");
     setActiveTab('inventory');
@@ -718,6 +738,48 @@ const OtimizadorCorteAco = ({ user }) => {
                              <span className="text-xs text-red-400 cursor-pointer hover:underline hover:text-red-600" onClick={() => handleDeleteProject(editingProject.id)}>Excluir Projeto</span>
                           </div>
                       </div>
+                  </div>
+              </div>
+          </div>
+      )}
+
+      {/* --- MODAL DE RESTAURAÇÃO DE BACKUP --- */}
+      {showBackupModal && (
+          <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm px-4">
+              <div className="bg-white rounded-lg shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+                  <div className="bg-indigo-50 p-4 border-b border-indigo-100 flex justify-between items-center">
+                      <h3 className="font-bold text-indigo-900 flex items-center gap-2"><History size={18}/> Histórico de Backups</h3>
+                      <button onClick={() => setShowBackupModal(false)} className="text-slate-400 hover:text-slate-700"><X size={20}/></button>
+                  </div>
+                  <div className="p-4 bg-slate-50 max-h-[60vh] overflow-y-auto">
+                      {backupsList.length === 0 ? (
+                          <div className="text-center py-8 text-slate-400">Nenhum backup encontrado.</div>
+                      ) : (
+                          <div className="space-y-3">
+                              {backupsList.map(bkp => (
+                                  <div key={bkp.id} className="bg-white p-4 rounded border border-slate-200 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                                      <div>
+                                          <div className="font-bold text-slate-800">{bkp.reason || "Backup Automático"}</div>
+                                          <div className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                                            <Calendar size={12}/> {bkp.createdAt?.toDate().toLocaleString()}
+                                          </div>
+                                          <div className="text-xs text-slate-400 mt-1">
+                                              {bkp.items?.length || 0} itens no estoque
+                                          </div>
+                                      </div>
+                                      <button 
+                                        onClick={() => restoreBackup(bkp)}
+                                        className="text-sm bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100 px-3 py-1.5 rounded flex items-center gap-2 font-medium transition-colors"
+                                      >
+                                          <RotateCcw size={14}/> Restaurar
+                                      </button>
+                                  </div>
+                              ))}
+                          </div>
+                      )}
+                  </div>
+                  <div className="p-3 bg-white border-t border-slate-100 text-center text-xs text-slate-400">
+                      Mostrando os últimos {MAX_BACKUPS} backups
                   </div>
               </div>
           </div>
@@ -909,6 +971,10 @@ const OtimizadorCorteAco = ({ user }) => {
               <div className="flex justify-between items-center flex-wrap gap-4">
                   <h2 className="text-lg font-semibold text-slate-700">Estoque de Pontas</h2>
                   <div className="flex gap-2 flex-wrap">
+                    {/* Botão de Histórico de Backup */}
+                    <button onClick={fetchBackups} className="flex items-center gap-1 bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-md hover:bg-amber-200 text-sm font-medium transition-colors">
+                        <History size={16} /> Histórico
+                    </button>
                     <button onClick={clearInventory} className="text-red-500 text-sm hover:underline px-2">Zerar</button>
                     <button onClick={openAddStockModal} className="flex items-center gap-1 bg-green-600 text-white px-3 py-1.5 rounded-md hover:bg-green-700 text-sm"><Plus size={16} /> Adicionar</button>
                   </div>
