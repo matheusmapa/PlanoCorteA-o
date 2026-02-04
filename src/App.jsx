@@ -1467,30 +1467,30 @@ const OtimizadorCorteAco = ({ user }) => {
                 <div className="flex justify-between items-center bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex-wrap gap-4">
                     <div><h2 className="text-xl font-bold text-indigo-900">Plano Gerado</h2></div>
                     <div className="flex gap-2 items-center flex-wrap">
-                        {/* Botão de Execução do Projeto */}
-                        <button 
-                            onClick={handleExecuteProject} 
-                            className="bg-purple-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm font-bold border border-purple-800"
-                            title="Baixar estoque usado e salvar sobras"
-                        >
-                            <CheckSquare size={16} /> Executar Projeto
-                        </button>
-                        
-                        {/* Botão Salvar Plano */}
-                        <button onClick={handleSaveCutPlan} className="bg-indigo-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-700 transition-colors">
-                            <Save size={16} /> Salvar Plano
-                        </button>
-                        
-                        <button onClick={generatePDF} className="bg-white text-indigo-700 border border-indigo-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-50">
-                            <Printer size={16} /> PDF
-                        </button>
-                        <button onClick={consolidateLeftovers} className="bg-green-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-green-700">
-                            <FolderDown size={16} /> Salvar Sobras
-                        </button>
-                        <button onClick={clearResults} className="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-red-100">
-                            <Eraser size={16} /> Limpar
-                        </button>
-                    </div>
+    {/* 1. PDF */}
+    <button onClick={generatePDF} className="bg-white text-indigo-700 border border-indigo-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-50">
+        <Printer size={16} /> PDF
+    </button>
+
+    {/* 2. Salvar Plano */}
+    <button onClick={handleSaveCutPlan} className="bg-indigo-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-700 transition-colors">
+        <Save size={16} /> Salvar Plano
+    </button>
+
+    {/* 3. Limpar */}
+    <button onClick={clearResults} className="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-red-100">
+        <Eraser size={16} /> Limpar
+    </button>
+
+    {/* 4. Executar Projeto */}
+    <button 
+        onClick={handleExecuteProject} 
+        className="bg-purple-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm font-bold border border-purple-800"
+        title="Baixar estoque usado e salvar sobras"
+    >
+        <CheckSquare size={16} /> Executar Projeto
+    </button>
+</div>
                 </div>
                 {renderBitolaTabs(activeResultsBitola, setActiveResultsBitola, results.map(r => parseFloat(r.bitola)).sort((a,b)=>a-b))}
                 {(activeResultsBitola === 'todas' ? results : results.filter(g => Math.abs(parseFloat(g.bitola) - parseFloat(activeResultsBitola)) < 0.01)).map((group, gIdx) => (
