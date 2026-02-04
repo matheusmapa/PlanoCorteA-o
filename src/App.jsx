@@ -835,11 +835,12 @@ const OtimizadorCorteAco = ({ user }) => {
       {/* --- RENDERIZAÇÃO DO NOVO MODAL DE ESTRATÉGIA --- */}
       {showStrategyModal && (
           <StrategyAnalyzer 
-              projects={projects}
-              onClose={() => setShowStrategyModal(false)}
-              onLoadStrategy={applyStrategy}
-          />
-      )}
+            projects={projects}
+            inventory={inventory}  // <--- CERTIFIQUE-SE QUE ESSA LINHA EXISTE
+            onClose={() => setShowStrategyModal(false)}
+            onLoadStrategy={applyStrategy}
+        />
+    )}
 
       <header className="bg-slate-900 text-white p-4 shadow-lg sticky top-0 z-40">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
