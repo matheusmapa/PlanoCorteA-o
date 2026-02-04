@@ -1223,8 +1223,18 @@ const OtimizadorCorteAco = ({ user }) => {
     <Clipboard size={18} /> Estoque ({inventory.reduce((acc, i) => acc + i.qty, 0)})
   </button>
 
-  {/* 3. Resultado */}
-  <button onClick={() => setActiveTab('results')} disabled={!results} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'results' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-400 cursor-not-allowed'}`}>
+ {/* 3. Resultado */}
+  <button 
+    onClick={() => setActiveTab('results')} 
+    disabled={!results} 
+    className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${
+      activeTab === 'results' 
+        ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' // Ativo
+        : results 
+          ? 'text-slate-500 hover:bg-white cursor-pointer' // Inativo, mas com resultados (Liberado)
+          : 'text-slate-400 cursor-not-allowed opacity-60' // Sem resultados (Bloqueado)
+    }`}
+  >
     <Download size={18} /> Resultado
   </button>
   
