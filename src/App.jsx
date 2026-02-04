@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Trash2, Plus, Download, Clipboard, Save, RefreshCw, FileText, Settings, Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, FolderUp, X, Eraser, LogOut, User, Menu, FolderHeart, Calendar, Edit3, Check, History, RotateCcw } from 'lucide-react';
+import { 
+  Trash2, Plus, Download, Clipboard, Save, RefreshCw, FileText, Settings, 
+  Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, 
+  FolderUp, X, Eraser, LogOut, User, Menu, FolderHeart, Calendar, Edit3, 
+  Check, History, RotateCcw, BarChart3 // <--- ADICIONADO BarChart3
+} from 'lucide-react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
-// ADICIONADO: getDocs, writeBatch para gerenciar os backups em lote
 import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, setDoc, getDocs, writeBatch } from 'firebase/firestore';
 
 // Lógica externa
@@ -9,6 +13,7 @@ import { extractTextFromPDF, parseTextToItems, BITOLAS_COMERCIAIS, generateId } 
 import { calculateCutPlan } from './cutOptimizer';
 import { auth, db } from './firebase'; 
 import Login from './Login';
+import PlanEvaluator from './PlanEvaluator'; // <--- IMPORTADO O NOVO COMPONENTE
 
 // --- COMPONENTE PRINCIPAL ---
 const OtimizadorCorteAco = ({ user }) => {
@@ -822,6 +827,14 @@ const OtimizadorCorteAco = ({ user }) => {
           <button onClick={() => setActiveTab('results')} disabled={!results} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'results' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : results ? 'bg-green-50 text-green-700' : 'text-slate-400 cursor-not-allowed'}`}>
             <Download size={18} /> Resultado
           </button>
+          
+          {/* BOTÃO DO NOVO COMPARADOR */}
+          <button 
+            onClick={() => setActiveTab('evaluator')} 
+            className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'evaluator' ? 'bg-white border-b-2 border-indigo-600 text-indigo-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}
+          >
+            <BarChart3 size={18} /> Comparador
+          </button>
         </div>
 
         {/* --- TAB: INPUT (DEMANDA) --- */}
@@ -1100,6 +1113,15 @@ const OtimizadorCorteAco = ({ user }) => {
                 ))}
             </div>
         )}
+        
+        {/* --- TAB: EVALUATOR (COMPARADOR DE PLANOS) --- */}
+        {activeTab === 'evaluator' && (
+            <PlanEvaluator 
+                savedPlans={savedPlans} 
+                onDeletePlan={handleDeleteCutPlan} 
+            />
+        )}
+
       </main>
       <style>{`.pattern-diagonal-lines { background-image: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(255,255,255,0.5) 5px, rgba(255,255,255,0.5) 10px); } .no-scrollbar::-webkit-scrollbar { display: none; } .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }`}</style>
     </div>
