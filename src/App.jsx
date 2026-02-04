@@ -3,7 +3,7 @@ import {
   Trash2, Plus, Download, Clipboard, Save, RefreshCw, FileText, Settings, 
   Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, 
   FolderUp, X, Eraser, LogOut, User, Menu, FolderHeart, Calendar, Edit3, 
-  Check, History, RotateCcw, BarChart3 // <--- ADICIONADO BarChart3
+  Check, History, RotateCcw, BarChart3, Lightbulb, Layers // Ícones atualizados
 } from 'lucide-react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, setDoc, getDocs, writeBatch } from 'firebase/firestore';
@@ -13,7 +13,8 @@ import { extractTextFromPDF, parseTextToItems, BITOLAS_COMERCIAIS, generateId } 
 import { calculateCutPlan } from './cutOptimizer';
 import { auth, db } from './firebase'; 
 import Login from './Login';
-import PlanEvaluator from './PlanEvaluator'; // <--- IMPORTADO O NOVO COMPONENTE
+import PlanEvaluator from './PlanEvaluator'; // Aba Comparador
+import StrategyAnalyzer from './StrategyAnalyzer'; // Modal de Estratégia
 
 // --- COMPONENTE PRINCIPAL ---
 const OtimizadorCorteAco = ({ user }) => {
@@ -24,7 +25,7 @@ const OtimizadorCorteAco = ({ user }) => {
   const [results, setResults] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
   
-  // NOVA CHAVE: Usar sobras de estoque? (Padrão: Sim)
+  // Opções
   const [useLeftovers, setUseLeftovers] = useState(true);
   
   // Arquivos: uploadedFiles agora pode conter arquivos REAIS ou PROJETOS CARREGADOS
@@ -34,14 +35,15 @@ const OtimizadorCorteAco = ({ user }) => {
   const [projects, setProjects] = useState([]); // INPUT (Projetos salvos)
   const [savedPlans, setSavedPlans] = useState([]); // OUTPUT (Planos de corte salvos)
   
-  // --- Estados de Backup ---
+  // --- Estados de Modais e UI ---
   const [showBackupModal, setShowBackupModal] = useState(false);
+  const [showStrategyModal, setShowStrategyModal] = useState(false); // NOVO: Modal de Estratégia
   const [backupsList, setBackupsList] = useState([]);
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [editingProject, setEditingProject] = useState(null); // Projeto sendo editado no modal
   
-  // --- Estados de Interface ---
+  // --- Estados de Interface (Filtros e Inputs) ---
   const [activeInventoryBitola, setActiveInventoryBitola] = useState('todas');
   const [activeResultsBitola, setActiveResultsBitola] = useState('todas');
   const [showAddStockModal, setShowAddStockModal] = useState(false);
@@ -86,7 +88,7 @@ const OtimizadorCorteAco = ({ user }) => {
     };
     const cleanupScripts = loadScripts();
 
-    // 2. Tenta carregar LocalStorage primeiro (para ter algo rápido na tela)
+    // 2. Tenta carregar LocalStorage primeiro
     const savedInventory = localStorage.getItem('estoquePontas');
     if (savedInventory) {
       try {
@@ -143,31 +145,76 @@ const OtimizadorCorteAco = ({ user }) => {
     return cleanupScripts;
   }, [user]);
 
-  // --- NOVA FUNÇÃO DE BACKUP INTELIGENTE ---
+  // --- FUNÇÃO DE ESTRATÉGIA (INTEGRAÇÃO COM O MODAL) ---
+  const applyStrategy = (projectsToLoad, mode) => {
+      // Esta função recebe os projetos selecionados no modal e o modo (separate/combined)
+      
+      const newItems = [];
+      const newUploadedFiles = [...uploadedFiles];
+      
+      projectsToLoad.forEach(proj => {
+          // Verifica se já não foi carregado para evitar duplicatas visuais na lista de arquivos
+          if (!uploadedFiles.some(f => f.id === proj.id)) {
+              const projectOriginName = `[PROJETO] ${proj.name}`;
+              
+              // Gera novos IDs para os itens para evitar conflitos na lista
+              const itemsWithOrigin = proj.items.map(item => ({
+                  ...item,
+                  id: generateId(), 
+                  origin: projectOriginName
+              }));
+              
+              newItems.push(...itemsWithOrigin);
+              newUploadedFiles.push({
+                  id: proj.id,
+                  name: proj.name,
+                  originName: projectOriginName,
+                  type: 'project',
+                  status: 'ok',
+                  count: itemsWithOrigin.length
+              });
+          }
+      });
+
+      if (newItems.length > 0) {
+          setItems(prev => [...prev, ...newItems]);
+          setUploadedFiles(newUploadedFiles);
+          
+          if (mode === 'combined') {
+              alert(`Estratégia Ousada Aplicada!\n${projectsToLoad.length} projetos foram UNIFICADOS na lista de corte.\nAgora clique em "CALCULAR OTIMIZAÇÃO".`);
+          } else {
+              alert(`Estratégia Conservadora Aplicada!\n${projectsToLoad.length} projetos carregados individualmente para a lista.`);
+          }
+          
+          setActiveTab('input'); // Volta para a tela principal
+          setShowStrategyModal(false); // Fecha o modal
+      } else {
+          alert("Os projetos selecionados já estão carregados na lista de corte.");
+          setShowStrategyModal(false);
+      }
+  };
+
+  // --- FUNÇÕES DE BACKUP E ESTOQUE ---
   const createInventoryBackup = async (reason) => {
     if (!user) return;
     try {
         const backupsRef = collection(db, 'users', user.uid, 'inventoryBackups');
         
-        // 1. Cria o backup atual
         await addDoc(backupsRef, {
-            items: inventory, // Salva o estado ATUAL antes de modificar
+            items: inventory,
             reason: reason,
             createdAt: serverTimestamp()
         });
 
-        // 2. Limpeza: Mantém apenas os últimos X backups
         const q = query(backupsRef, orderBy('createdAt', 'desc'));
         const snapshot = await getDocs(q);
         
         if (snapshot.docs.length > MAX_BACKUPS) {
             const batch = writeBatch(db);
-            // Pega todos os docs a partir do índice MAX_BACKUPS e marca para deletar
             snapshot.docs.slice(MAX_BACKUPS).forEach(doc => {
                 batch.delete(doc.ref);
             });
             await batch.commit();
-            console.log("Limpeza de backups antigos realizada.");
         }
     } catch (error) {
         console.error("Erro ao criar backup:", error);
@@ -198,7 +245,6 @@ const OtimizadorCorteAco = ({ user }) => {
       }
   };
 
-  // --- Função Atualizar Estoque (Local + Banco) ---
   const updateInventory = async (newInv) => {
     setInventory(newInv);
     localStorage.setItem('estoquePontas', JSON.stringify(newInv));
@@ -214,7 +260,7 @@ const OtimizadorCorteAco = ({ user }) => {
     }
   };
 
-  // --- Funções: Planos de Corte (Output) ---
+  // --- FUNÇÕES: PLANOS DE CORTE (OUTPUT) ---
   const handleSaveCutPlan = async () => {
       if (!results) return alert("Não há resultado gerado para salvar.");
       const planName = window.prompt("Nome para este Plano de Corte (ex: Lote A - 03/02):");
@@ -253,7 +299,7 @@ const OtimizadorCorteAco = ({ user }) => {
       }
   };
 
-  // --- Funções: Projetos de Demanda (Input) ---
+  // --- FUNÇÕES: PROJETOS DE DEMANDA (INPUT) ---
   const handleSaveProject = async () => {
       if (items.length === 0) return alert("A lista de corte está vazia. Nada para salvar.");
       const projectName = window.prompt("Nome do Projeto (ex: Obra Residencial Silva):");
@@ -324,7 +370,7 @@ const OtimizadorCorteAco = ({ user }) => {
       }
   };
 
-  // --- Funções Gerais do App ---
+  // --- FUNÇÕES GERAIS E DE UI ---
 
   const handleLogout = () => {
       if(window.confirm("Deseja realmente sair?")) {
@@ -437,7 +483,6 @@ const OtimizadorCorteAco = ({ user }) => {
       const { bitola, length, qty } = newStockItemData;
       if (length <= 0 || qty <= 0) return alert("Valores inválidos");
       const newPonta = { id: generateId(), bitola: parseFloat(bitola), length: parseFloat(length), qty: parseInt(qty), source: 'estoque_manual' };
-      // USANDO A NOVA FUNÇÃO
       updateInventory([...inventory, newPonta]);
       setShowAddStockModal(false);
   };
@@ -453,13 +498,12 @@ const OtimizadorCorteAco = ({ user }) => {
 
   const clearInventory = async () => {
       if(window.confirm("Tem certeza que deseja APAGAR TODO o estoque de pontas?")) {
-          // BACKUP ANTES DE LIMPAR
           await createInventoryBackup("Antes de Limpar Tudo");
           updateInventory([]);
       }
   }
 
-  // --- OTIMIZAÇÃO ---
+  // --- OTIMIZAÇÃO E RESULTADOS ---
   const runOptimization = () => {
     const itemsToCut = filteredItems.filter(item => item.selected);
     if (itemsToCut.length === 0) return alert("Nenhum item válido para cortar.");
@@ -480,7 +524,6 @@ const OtimizadorCorteAco = ({ user }) => {
     }, 100);
   };
 
-  // --- PDF ---
   const generatePDF = () => {
     if (!window.jspdf || !results) return alert("Biblioteca PDF não carregada.");
     const { jsPDF } = window.jspdf;
@@ -556,7 +599,6 @@ const OtimizadorCorteAco = ({ user }) => {
     setActiveTab('inventory');
   };
 
-  // --- EXECUTAR PROJETO (INTEGRADA) ---
   const handleExecuteProject = async () => {
     if (!results) return;
 
@@ -625,12 +667,12 @@ const OtimizadorCorteAco = ({ user }) => {
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans relative overflow-x-hidden">
       
       {/* --- SIDEBAR LATERAL (MEUS ARQUIVOS) --- */}
-      <div className={`fixed inset-y-0 right-0 w-80 bg-white shadow-2xl z-[60] transform transition-transform duration-300 ease-in-out border-l border-slate-200 ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'}`}>
-          <div className="p-4 bg-indigo-900 text-white flex justify-between items-center shadow-md">
+      <div className={`fixed inset-y-0 right-0 w-80 bg-white shadow-2xl z-[60] transform transition-transform duration-300 ease-in-out border-l border-slate-200 flex flex-col ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'}`}>
+          <div className="p-4 bg-indigo-900 text-white flex justify-between items-center shadow-md shrink-0">
               <h2 className="font-bold flex items-center gap-2"><FolderHeart size={20} /> Meus Arquivos</h2>
               <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-indigo-700 p-1 rounded"><X size={20}/></button>
           </div>
-          <div className="p-4 overflow-y-auto h-[calc(100vh-64px)] space-y-6 bg-slate-50">
+          <div className="flex-1 overflow-y-auto p-4 space-y-6 bg-slate-50">
               
               {/* SEÇÃO 1: PROJETOS (INPUT) */}
               <div>
@@ -790,6 +832,15 @@ const OtimizadorCorteAco = ({ user }) => {
           </div>
       )}
 
+      {/* --- RENDERIZAÇÃO DO NOVO MODAL DE ESTRATÉGIA --- */}
+      {showStrategyModal && (
+          <StrategyAnalyzer 
+              projects={projects}
+              onClose={() => setShowStrategyModal(false)}
+              onLoadStrategy={applyStrategy}
+          />
+      )}
+
       <header className="bg-slate-900 text-white p-4 shadow-lg sticky top-0 z-40">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
           <div className="flex items-center gap-2">
@@ -816,11 +867,21 @@ const OtimizadorCorteAco = ({ user }) => {
 
       <main className="max-w-6xl mx-auto p-4">
         
-        {/* NAVEGAÇÃO DE ABAS */}
+        {/* NAVEGAÇÃO DE ABAS COM O NOVO BOTÃO DE ESTRATÉGIA */}
         <div className="flex gap-2 sm:gap-4 mb-6 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar">
           <button onClick={() => setActiveTab('input')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'input' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
             <FileText size={18} /> Demanda
           </button>
+          
+          {/* BOTÃO QUE ABRE O MODAL */}
+          <button 
+            onClick={() => setShowStrategyModal(true)} 
+            className="flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap text-amber-600 hover:bg-amber-50 hover:text-amber-700 font-bold animate-pulse-slow"
+            title="Comparar cenários e otimizar estratégia"
+          >
+            <Lightbulb size={18} /> Assistente de Estratégia
+          </button>
+
           <button onClick={() => setActiveTab('inventory')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'inventory' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
             <Clipboard size={18} /> Estoque ({inventory.reduce((acc, i) => acc + i.qty, 0)})
           </button>
@@ -1065,7 +1126,7 @@ const OtimizadorCorteAco = ({ user }) => {
                         {/* Botão de Execução do Projeto */}
                         <button 
                             onClick={handleExecuteProject} 
-                            className="bg-purple-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-purple-700 transition-colors font-bold border border-purple-800"
+                            className="bg-purple-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm font-bold border border-purple-800"
                             title="Baixar estoque usado e salvar sobras"
                         >
                             <CheckSquare size={16} /> Executar Projeto
@@ -1114,7 +1175,7 @@ const OtimizadorCorteAco = ({ user }) => {
             </div>
         )}
         
-        {/* --- TAB: EVALUATOR (COMPARADOR DE PLANOS) --- */}
+        {/* --- ABA: COMPARADOR (EVALUATOR) --- */}
         {activeTab === 'evaluator' && (
             <PlanEvaluator 
                 savedPlans={savedPlans} 
