@@ -471,13 +471,6 @@ const OtimizadorCorteAco = ({ user }) => {
 
   const consolidateLeftovers = () => {
     if (!results) return;
-    const usedCounts = {};
-    results.forEach(group => {
-        group.bars.forEach(barGroup => {
-            if (barGroup.type === 'estoque') {
-                barGroup.ids.forEach(id => { usedCounts[id] = (usedCounts[id] || 0) + 1; });
-            }const consolidateLeftovers = () => {
-    if (!results) return;
     
     // --- ADICIONADO: Confirmação antes de salvar ---
     if (!window.confirm("Deseja realmente salvar as sobras deste plano no estoque?")) return;
