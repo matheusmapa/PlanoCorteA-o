@@ -867,36 +867,38 @@ const OtimizadorCorteAco = ({ user }) => {
 
       <main className="max-w-6xl mx-auto p-4">
         
-        {/* NAVEGAÇÃO DE ABAS COM O NOVO BOTÃO DE ESTRATÉGIA */}
-        <div className="flex gap-2 sm:gap-4 mb-6 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar">
-          <button onClick={() => setActiveTab('input')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'input' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
-            <FileText size={18} /> Demanda
-          </button>
-          
-          {/* BOTÃO QUE ABRE O MODAL */}
-          <button 
-            onClick={() => setShowStrategyModal(true)} 
-            className="flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap text-amber-600 hover:bg-amber-50 hover:text-amber-700 font-bold animate-pulse-slow"
-            title="Comparar cenários e otimizar estratégia"
-          >
-            <Lightbulb size={18} /> Assistente de Estratégia
-          </button>
+        {/* --- NAVEGAÇÃO DE ABAS --- */}
+<div className="flex gap-2 sm:gap-4 mb-6 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar items-center">
+  
+  {/* 1. Demanda */}
+  <button onClick={() => setActiveTab('input')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'input' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
+    <FileText size={18} /> Demanda
+  </button>
 
-          <button onClick={() => setActiveTab('inventory')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'inventory' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
-            <Clipboard size={18} /> Estoque ({inventory.reduce((acc, i) => acc + i.qty, 0)})
-          </button>
-          <button onClick={() => setActiveTab('results')} disabled={!results} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'results' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : results ? 'bg-green-50 text-green-700' : 'text-slate-400 cursor-not-allowed'}`}>
-            <Download size={18} /> Resultado
-          </button>
-          
-          {/* BOTÃO DO NOVO COMPARADOR */}
-          <button 
-            onClick={() => setActiveTab('evaluator')} 
-            className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'evaluator' ? 'bg-white border-b-2 border-indigo-600 text-indigo-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}
-          >
-            <BarChart3 size={18} /> Comparador
-          </button>
-        </div>
+  {/* 2. Estoque */}
+  <button onClick={() => setActiveTab('inventory')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'inventory' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
+    <Clipboard size={18} /> Estoque ({inventory.reduce((acc, i) => acc + i.qty, 0)})
+  </button>
+
+  {/* 3. Resultado */}
+  <button onClick={() => setActiveTab('results')} disabled={!results} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'results' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-400 cursor-not-allowed'}`}>
+    <Download size={18} /> Resultado
+  </button>
+  
+  {/* 4. Comparador */}
+  <button onClick={() => setActiveTab('evaluator')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'evaluator' ? 'bg-white border-b-2 border-indigo-600 text-indigo-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
+    <BarChart3 size={18} /> Comparador
+  </button>
+
+  {/* 5. Assistente de Estratégia (MOVIDO PARA O FINAL) */}
+  <button 
+    onClick={() => setShowStrategyModal(true)} 
+    className="flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap text-amber-600 hover:bg-amber-50 hover:text-amber-700 font-bold animate-pulse-slow ml-auto sm:ml-0"
+    title="Comparar cenários e otimizar estratégia"
+  >
+    <Lightbulb size={18} /> Assistente de Estratégia
+  </button>
+</div>
 
         {/* --- TAB: INPUT (DEMANDA) --- */}
         {activeTab === 'input' && (
