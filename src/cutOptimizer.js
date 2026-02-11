@@ -15,7 +15,7 @@ export const calculateCutPlan = (items, inventory, barraPadrao = 1200, perdaCort
             itemsByBitola[item.bitola].push({ 
                 ...item, 
                 realId: `${item.id}-${i}`,
-                // Salva os detalhes para uso posterior
+                // Salva os detalhes num objeto separado para transportar
                 details: {
                     elemento: item.elemento || '',
                     posicao: item.posicao || '',
@@ -51,7 +51,6 @@ export const calculateCutPlan = (items, inventory, barraPadrao = 1200, perdaCort
             let bestBarIndex = -1;
             let minWaste = Infinity;
 
-            // Tenta encaixar em barras iniciadas
             for (let i = 0; i < barsUsed.length; i++) {
                 const bar = barsUsed[i];
                 if (bar.remaining >= piece.length + perdaCorte) {
@@ -61,8 +60,8 @@ export const calculateCutPlan = (items, inventory, barraPadrao = 1200, perdaCort
             }
 
             if (bestBarIndex !== -1) {
-                // Adiciona o corte (número) E o detalhe (objeto)
                 barsUsed[bestBarIndex].cuts.push(piece.length);
+                // Guardamos o detalhe sincronizado com o corte
                 barsUsed[bestBarIndex].cutsDetails.push(piece.details);
                 barsUsed[bestBarIndex].remaining -= (piece.length + perdaCorte);
                 fitted = true;
@@ -85,7 +84,7 @@ export const calculateCutPlan = (items, inventory, barraPadrao = 1200, perdaCort
                         originalLength: stockList[bestStockIndex].length,
                         remaining: stockList[bestStockIndex].length - piece.length - perdaCorte,
                         cuts: [piece.length],
-                        cutsDetails: [piece.details], // ARRAY NOVO
+                        cutsDetails: [piece.details], // Array paralelo
                         id: stockList[bestStockIndex].id
                     });
                     fitted = true;
@@ -95,23 +94,21 @@ export const calculateCutPlan = (items, inventory, barraPadrao = 1200, perdaCort
                         originalLength: barraPadrao,
                         remaining: barraPadrao - piece.length - perdaCorte,
                         cuts: [piece.length],
-                        cutsDetails: [piece.details], // ARRAY NOVO
+                        cutsDetails: [piece.details], // Array paralelo
                         id: 'new-' + generateId()
                     });
                 }
             }
         });
 
-        // 3. Agrupamento e Ordenação Visual
+        // 3. Agrupamento Visual
         const groupedBars = [];
         
         barsUsed.forEach(bar => {
-            // Precisamos ordenar os cortes (maior pro menor) MAS manter os detalhes sincronizados
-            // Criamos um array temporário combinado para ordenar
+            // Ordenamos os cortes por tamanho, mas precisamos levar os detalhes junto
             const combined = bar.cuts.map((len, idx) => ({ len, det: bar.cutsDetails[idx] }));
             combined.sort((a, b) => b.len - a.len);
 
-            // Desacopla novamente
             const sortedCuts = combined.map(c => c.len);
             const sortedDetails = combined.map(c => c.det);
 
@@ -120,15 +117,17 @@ export const calculateCutPlan = (items, inventory, barraPadrao = 1200, perdaCort
 
             if (existingGroup) {
                 existingGroup.count++;
-                // Acumula os detalhes de TODAS as barras deste grupo
+                existingGroup.ids.push(bar.id);
+                // Adiciona os detalhes desta barra nova ao grupo
                 existingGroup.allDetails.push(sortedDetails);
             } else {
                 groupedBars.push({ 
                     ...bar, 
                     cuts: sortedCuts, 
                     count: 1, 
-                    signature: signature,
-                    // Inicializa array de detalhes do grupo (Array de Arrays)
+                    signature: signature, 
+                    ids: [bar.id],
+                    // Inicia lista de detalhes (Array de Arrays)
                     allDetails: [sortedDetails] 
                 });
             }
