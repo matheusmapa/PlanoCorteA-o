@@ -1,3 +1,5 @@
+// src/pdfProcessor.js
+
 // --- CONSTANTES ---
 export const BITOLAS_COMERCIAIS = [4.2, 5.0, 6.3, 8.0, 10.0, 12.5, 16.0, 20.0, 25.0, 32.0, 40.0];
 
@@ -20,120 +22,88 @@ export const extractTextFromPDF = async (file) => {
   for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
-      let lastY = -1;
-      let pageText = "";
-      for (const item of textContent.items) {
-          if (lastY !== -1 && Math.abs(item.transform[5] - lastY) > 5) {
-              pageText += "\n";
-          }
-          pageText += item.str + " ";
-          lastY = item.transform[5];
-      }
-      fullText += pageText + "\n--- PAGE BREAK ---\n";
+      
+      // Melhoramos a extração para manter um pouco mais da estrutura visual
+      const pageText = textContent.items.map(item => item.str).join(' ');
+      fullText += pageText + " |PAGE_BREAK| ";
   }
   return fullText;
 };
 
-// --- PARSER (RegEx e Lógica de Extração) ---
+// --- PARSER INTELIGENTE POR BLOCOS ---
 export const parseTextToItems = (text, fileName) => {
-  let cleanText = text
-      .replace(/CA\s*-?\s*\d+/gi, '') 
-      .replace(/\$/g, '')
-      .replace(/\\times/g, 'x')
-      .replace(/\\/g, '')
-      .replace(/CONSUMIDOR FINAL\/CF/g, '')
-      .replace(/Código: \d+/g, '')
-      .replace(/L\d+=.*?(\n|$)/g, '') 
-      .replace(/Peso.*?(\n|$)/g, '')  
-      .replace(/Bitola \(mm\)|Aço|Trechos|Página \d+ de \d+/gi, '');
+    const extracted = [];
+    
+    // 1. Tentar descobrir o NOME DO PROJETO (Localizador)
+    // Procura por "Resumo Geral da Entrega: XXXX" ou "LIVING-MA.114" no cabeçalho
+    let projectMatch = text.match(/LIVING-[A-Z0-9.]+/i) || text.match(/Obra:\s*([^\s|]+)/i);
+    const projectName = projectMatch ? projectMatch[0].trim() : fileName.replace('.pdf', '');
 
-  const normalizedText = cleanText.replace(/,/g, '.').replace(/\s+/g, ' ');
-  const extracted = [];
+    // 2. Limpeza básica para padronizar
+    let cleanText = text.replace(/\s+/g, ' '); // Remove quebras de linha e espaços duplos
 
-  const bitolaRegex = /(\d+[.,]\d+)/g;
-  let match;
+    // 3. Estratégia: Dividir o texto em blocos onde cada bloco começa com "Elemento"
+    // O PDF lista assim: "Elemento P101 ... Posição 07 ... OS 1"
+    const blocks = cleanText.split(/Elemento/gi);
 
-  while ((match = bitolaRegex.exec(normalizedText)) !== null) {
-      const bitolaVal = parseFloat(match[1]);
-      
-      if (BITOLAS_COMERCIAIS.includes(bitolaVal)) {
-          const startIndex = bitolaRegex.lastIndex;
-          const contextChunk = normalizedText.substring(startIndex, startIndex + 180);
+    // Ignora o primeiro pedaço (cabeçalho antes do primeiro elemento)
+    for (let i = 1; i < blocks.length; i++) {
+        const block = blocks[i];
 
-          const qtdeMatch = contextChunk.match(/Qtde\s*[a-zA-Z]*\s*[:.]?\s*(\d+(?:\s*[xX*]\s*\d+)?)/i);
-          const comprMatch = contextChunk.match(/Compr\w*\s*[:.]?\s*(\d{2,4})/i);
+        // --- EXTRAÇÃO DOS CAMPOS COM REGEX ---
+        
+        // Nome do Elemento (pega a primeira palavra logo após a quebra)
+        const elementoMatch = block.match(/^[\s:]*([A-Z0-9-]+)/i);
+        const elemento = elementoMatch ? elementoMatch[1] : "Desconhecido";
 
-          let qtd = 0;
-          let length = 0;
+        // Bitola (procura "Bitola (mm)" seguido de numero)
+        const bitolaMatch = block.match(/Bitola\s*\(mm\)\s*([\d,.]+)/i) || block.match(/([\d,.]+)\s*Bitola/i);
+        
+        // Quantidade (pode ser "Qtde" ou "Rep. x Var.")
+        // Prioridade para Rep. x Var. se existir, pois geralmente define a quantidade total em alguns layouts
+        let qty = 0;
+        const repVarMatch = block.match(/Rep\.\s*x\s*Var\.\s*(\d+)/i);
+        const qtdeMatch = block.match(/Qtde\s*[:.]?\s*(\d+)/i);
 
-          if (qtdeMatch && comprMatch) {
-              length = parseFloat(comprMatch[1]);
-              const qStr = qtdeMatch[1];
-              if (qStr.toLowerCase().includes('x') || qStr.includes('*')) {
-                  const parts = qStr.toLowerCase().replace('x', '*').split('*');
-                  qtd = parseInt(parts[0]) * parseInt(parts[1]);
-              } else {
-                  qtd = parseInt(qStr);
-              }
-          } 
-          else {
-              const fallbackNums = contextChunk.matchAll(/(\d+(?:\s*[xX*]\s*\d+)?)/g);
-              const candidates = [];
-              for (const m of fallbackNums) {
-                  candidates.push(m[1]);
-                  if (candidates.length >= 2) break;
-              }
+        if (repVarMatch) {
+            qty = parseInt(repVarMatch[1]);
+        } else if (qtdeMatch) {
+            qty = parseInt(qtdeMatch[1]);
+        }
 
-              if (candidates.length >= 2) {
-                  const valAStr = candidates[0];
-                  const valBStr = candidates[1];
-                  let valA = 0, valB = 0;
-                  let isAMult = false, isBMult = false;
+        // Comprimento (procura "Compr. (cm)" seguido de numero)
+        const comprMatch = block.match(/Compr\.\s*\(cm\)\s*(\d+)/i);
+        
+        // Posição (Posição 07)
+        const posMatch = block.match(/Posição\s*([A-Z0-9]+)/i);
+        const posicao = posMatch ? posMatch[1] : "?";
 
-                  if (valAStr.toLowerCase().includes('x') || valAStr.includes('*')) {
-                      const parts = valAStr.toLowerCase().replace('x', '*').split('*');
-                      valA = parseInt(parts[0]) * parseInt(parts[1]);
-                      isAMult = true;
-                  } else { valA = parseFloat(valAStr); }
+        // OS (OS 58)
+        const osMatch = block.match(/OS\s*(\d+)/i);
+        const os = osMatch ? osMatch[1] : "";
 
-                  if (valBStr.toLowerCase().includes('x') || valBStr.includes('*')) {
-                      const parts = valBStr.toLowerCase().replace('x', '*').split('*');
-                      valB = parseInt(parts[0]) * parseInt(parts[1]);
-                      isBMult = true;
-                  } else { valB = parseFloat(valBStr); }
+        // --- VALIDAÇÃO E ADIÇÃO ---
+        if (bitolaMatch && qty > 0 && comprMatch) {
+            const bitolaVal = parseFloat(bitolaMatch[1].replace(',', '.'));
+            const length = parseFloat(comprMatch[1]);
 
-                  if (isAMult && !isBMult) { qtd = valA; length = valB; }
-                  else if (!isAMult && isBMult) { length = valA; qtd = valB; }
-                  else if (valA === 1200 && valB !== 1200) { length = valA; qtd = valB; }
-                  else if (valB === 1200 && valA !== 1200) { qtd = valA; length = valB; }
-                  else {
-                      if (valA > 50 && valB < 30) { length = valA; qtd = valB; }
-                      else if (valB > 50 && valA < 30) { qtd = valA; length = valB; }
-                      else { length = valA; qtd = valB; }
-                  }
-              }
-          }
+            // Filtra bitolas válidas e tamanhos lógicos
+            if (BITOLAS_COMERCIAIS.includes(bitolaVal) && length > 0) {
+                extracted.push({
+                    id: generateId(),
+                    origin: projectName, // Agora usamos o Nome do Projeto extraído
+                    bitola: bitolaVal,
+                    qty: qty,
+                    length: length,
+                    selected: true,
+                    // Novos campos metadados
+                    elemento: elemento,
+                    posicao: posicao,
+                    os: os
+                });
+            }
+        }
+    }
 
-          if (length > 20 && length <= 1200 && qtd > 0) {
-               const isDuplicate = extracted.some(i => 
-                  Math.abs(i.bitola - bitolaVal) < 0.01 && 
-                  i.length === length && 
-                  i.qty === qtd
-               );
-               
-               if (!isDuplicate) {
-                   extracted.push({
-                      id: generateId(),
-                      origin: fileName,
-                      bitola: bitolaVal,
-                      qty: qtd,
-                      length: length,
-                      selected: true
-                   });
-               }
-          }
-      }
-  }
-
-  return extracted;
+    return extracted;
 };
