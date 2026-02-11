@@ -668,32 +668,51 @@ const OtimizadorCorteAco = ({ user }) => {
         doc.setFont("helvetica", "normal"); doc.setFontSize(10);
         
         group.bars.forEach(bar => {
-             if (yPos > 260) { doc.addPage(); yPos = 20; }
+             // Aumentei o espaçamento para caber mais info
+             if (yPos > 255) { doc.addPage(); yPos = 20; }
              const typeText = bar.type === 'nova' ? "BARRA NOVA (1200cm)" : `PONTA ESTOQUE (${bar.originalLength}cm)`;
              doc.setFont("helvetica", "bold"); doc.text(`${bar.count}x  ${typeText}`, 15, yPos);
-             doc.setFont("helvetica", "normal"); doc.text(`Sobra: ${bar.remaining.toFixed(0)}cm`, 150, yPos, { align: 'right' }); yPos += 3;
+             doc.setFont("helvetica", "normal"); doc.text(`Sobra: ${bar.remaining.toFixed(0)}cm`, 150, yPos, { align: 'right' }); yPos += 4;
              
              const scale = 180 / bar.originalLength; 
              let currentX = 15;
              
+             // Altura da barra no PDF aumentada para 12 (era 8) para caber 2 linhas
+             const barHeight = 12;
+
              bar.cuts.forEach(cutItem => {
-                 // Agora cutItem pode ser um OBJETO ou NÚMERO (retrocompatibilidade)
                  const cutLength = typeof cutItem === 'object' ? cutItem.length : cutItem;
                  const cutDetails = typeof cutItem === 'object' ? cutItem.details : {};
                  
                  const cutWidth = cutLength * scale;
-                 doc.setFillColor(59, 130, 246); doc.rect(currentX, yPos, cutWidth, 8, 'F'); doc.rect(currentX, yPos, cutWidth, 8, 'S');
                  
-                 // Escreve o tamanho se couber
-                 if (cutWidth > 8) { 
+                 // Desenha o retângulo da peça
+                 doc.setFillColor(59, 130, 246); 
+                 doc.rect(currentX, yPos, cutWidth, barHeight, 'F'); 
+                 doc.rect(currentX, yPos, cutWidth, barHeight, 'S');
+                 
+                 // Lógica de Texto do PDF Otimizada
+                 if (cutWidth > 6) { 
                      doc.setTextColor(255, 255, 255); 
+                     
+                     // 1. TAMANHO (Centro Cima)
                      doc.setFontSize(8); 
                      doc.text(`${cutLength}`, currentX + (cutWidth / 2), yPos + 4, { align: 'center' }); 
                      
-                     // Tenta escrever o Elemento se couber e existir
-                     if (cutWidth > 12 && cutDetails && cutDetails.elemento) {
-                         doc.setFontSize(5);
-                         doc.text(cutDetails.elemento.substring(0, 8), currentX + (cutWidth / 2), yPos + 7, { align: 'center' });
+                     // 2. ELEMENTO (Centro Baixo)
+                     if (cutDetails && cutDetails.elemento && cutWidth > 10) {
+                         doc.setFontSize(6);
+                         // Trunca se for muito grande
+                         const elemText = cutDetails.elemento.length > 8 && cutWidth < 20 
+                            ? cutDetails.elemento.substring(0,6) + ".." 
+                            : cutDetails.elemento;
+                         doc.text(elemText, currentX + (cutWidth / 2), yPos + 9, { align: 'center' });
+                     }
+
+                     // 3. POSIÇÃO (Só se sobrar muito espaço)
+                     if (cutDetails && cutDetails.posicao && cutWidth > 25) {
+                        doc.setFontSize(5);
+                        doc.text(`Pos:${cutDetails.posicao}`, currentX + (cutWidth / 2), yPos + 11, { align: 'center' });
                      }
                  }
                  currentX += cutWidth;
@@ -701,9 +720,9 @@ const OtimizadorCorteAco = ({ user }) => {
              
              if (bar.remaining > 0) {
                  const remainingWidth = bar.remaining * scale;
-                 doc.setFillColor(220, 220, 220); doc.rect(currentX, yPos, remainingWidth, 8, 'F'); doc.rect(currentX, yPos, remainingWidth, 8, 'S');
+                 doc.setFillColor(220, 220, 220); doc.rect(currentX, yPos, remainingWidth, barHeight, 'F'); doc.rect(currentX, yPos, remainingWidth, barHeight, 'S');
              }
-             doc.setTextColor(0, 0, 0); yPos += 15;
+             doc.setTextColor(0, 0, 0); yPos += (barHeight + 8); // Pula para a próxima barra
         });
         yPos += 5;
     });
@@ -1527,17 +1546,18 @@ const OtimizadorCorteAco = ({ user }) => {
                                                 >
                                                     <span className="font-bold">{cutLength}</span>
                                                     
-                                                    {/* Tooltip em texto pequeno se couber */}
+                                                    {/* Mostra Elemento dentro da barra se houver espaço */}
                                                     {cutDetails?.elemento && (
-                                                        <span className="text-[9px] opacity-80 hidden sm:block truncate px-0.5">{cutDetails.elemento}</span>
+                                                        <span className="text-[10px] leading-tight truncate px-1 max-w-full">{cutDetails.elemento}</span>
                                                     )}
 
-                                                    {/* Tooltip Hover completo */}
-                                                    <div className="absolute inset-0 opacity-0 hover:opacity-100 bg-black/90 flex flex-col items-center justify-center text-[9px] p-1 z-10 pointer-events-none transition-opacity">
-                                                        <span className="font-bold text-yellow-300">{cutLength}cm</span>
-                                                        <span>{cutDetails?.elemento || '-'}</span>
-                                                        <span>Pos: {cutDetails?.posicao || '-'}</span>
-                                                        <span>OS: {cutDetails?.os || '-'}</span>
+                                                    {/* Tooltip Hover completo: Mostra TUDO */}
+                                                    <div className="absolute inset-0 opacity-0 hover:opacity-100 bg-black/95 flex flex-col items-center justify-center text-[9px] p-1 z-10 pointer-events-none transition-opacity shadow-lg">
+                                                        <span className="font-bold text-yellow-300 text-sm mb-0.5">{cutLength}cm</span>
+                                                        <span className="text-white font-bold">{cutDetails?.elemento || '-'}</span>
+                                                        <span className="text-slate-200">Pos: {cutDetails?.posicao || '-'}</span>
+                                                        <span className="text-slate-200">OS: {cutDetails?.os || '-'}</span>
+                                                        <span className="text-[8px] text-slate-400 mt-1 uppercase tracking-wide">{cutDetails?.origin || 'Sem Loc.'}</span>
                                                     </div>
                                                 </div>
                                             );
