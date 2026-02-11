@@ -1054,13 +1054,13 @@ const OtimizadorCorteAco = ({ user }) => {
         {/* NAVEGAÇÃO */}
         <div className="flex gap-2 sm:gap-4 mb-6 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar items-center">
           <button onClick={() => setActiveTab('input')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'input' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}><FileText size={18} /> Demanda</button>
-          <button onClick={() => setActiveTab('inventory')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'inventory' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}><Clipboard size={18} /> Pontas ({inventory.reduce((acc, i) => acc + i.qty, 0)})</button>
+          <button onClick={() => setActiveTab('inventory')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'inventory' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}><Clipboard size={18} /> Estoque ({inventory.reduce((acc, i) => acc + i.qty, 0)})</button>
           <button onClick={() => setActiveTab('results')} disabled={!results} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'results' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : results ? 'text-slate-500 hover:bg-white cursor-pointer' : 'text-slate-400 cursor-not-allowed opacity-60'}`}><Download size={18} /> Resultado</button>
           <button onClick={() => setActiveTab('evaluator')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'evaluator' ? 'bg-white border-b-2 border-indigo-600 text-indigo-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}><BarChart3 size={18} /> Comparador</button>
           <button onClick={() => setShowStrategyModal(true)} className="flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap text-amber-600 hover:bg-amber-50 hover:text-amber-700 font-bold animate-pulse-slow ml-auto sm:ml-0" title="Comparar cenários e otimizar estratégia"><Lightbulb size={18} /> Assistente de Estratégia</button>
         </div>
 
-        {/* TAB: INPUT */}
+      {/* TAB: INPUT */}
         {activeTab === 'input' && (
           <div className="space-y-6 animate-fade-in">
             
@@ -1212,20 +1212,6 @@ const OtimizadorCorteAco = ({ user }) => {
                   </table>
                 </div>
               )}
-            </div>
-            
-            {/* A div de botões antiga foi removida daqui */}
-
-          </div>
-        )}
-            </div>
-            <div className="flex flex-col sm:flex-row justify-end items-center gap-4 pb-8">
-                <label className="flex items-center gap-3 cursor-pointer bg-white px-4 py-3 rounded-md border border-slate-200 shadow-sm hover:border-indigo-300 transition-all select-none group">
-                    <div className={`w-5 h-5 flex items-center justify-center rounded border transition-colors ${useLeftovers ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>{useLeftovers && <Check size={14} className="text-white" />}</div>
-                    <input type="checkbox" className="hidden" checked={useLeftovers} onChange={(e) => setUseLeftovers(e.target.checked)} />
-                    <span className={`text-sm font-bold ${useLeftovers ? 'text-indigo-700' : 'text-slate-500'}`}>Usar Pontas de Estoque?</span>
-                </label>
-                <button onClick={runOptimization} disabled={filteredItems.length === 0 || isProcessing} className={`w-full sm:w-auto px-8 py-3 rounded-md shadow-md font-bold flex items-center justify-center gap-2 transition-all ${filteredItems.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:scale-105'}`}>{isProcessing ? <RefreshCw className="animate-spin" size={20} /> : <RefreshCw size={20} />} {isProcessing ? "CALCULANDO..." : "CALCULAR OTIMIZAÇÃO"}</button>
             </div>
           </div>
         )}
