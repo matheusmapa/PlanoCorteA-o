@@ -676,50 +676,39 @@ const OtimizadorCorteAco = ({ user }) => {
              const scale = 180 / bar.originalLength; 
              let currentX = 15;
              
-             // Altura da barra no PDF aumentada para caber mais linhas (16)
              const barHeight = 16;
 
              bar.cuts.forEach(cutItem => {
-                 // Agora cutItem é GARANTIDAMENTE um objeto {length, details} devido à correção no cutOptimizer
                  const cutLength = cutItem.length;
                  const cutDetails = cutItem.details || {};
                  
                  const cutWidth = cutLength * scale;
                  
-                 // Desenha o retângulo da peça
                  doc.setFillColor(59, 130, 246); 
                  doc.rect(currentX, yPos, cutWidth, barHeight, 'F'); 
                  doc.rect(currentX, yPos, cutWidth, barHeight, 'S');
                  
-                 // Lógica de Texto do PDF Otimizada
                  if (cutWidth > 6) { 
                      doc.setTextColor(255, 255, 255); 
                      
-                     // 1. TAMANHO (Centro Cima)
                      doc.setFontSize(8); 
                      doc.text(`${cutLength}`, currentX + (cutWidth / 2), yPos + 4, { align: 'center' }); 
                      
-                     // 2. ELEMENTO e POSIÇÃO (Centro Meio)
                      if (cutDetails && cutDetails.elemento && cutWidth > 12) {
                          doc.setFontSize(6);
                          let line2 = cutDetails.elemento;
-                         // Adiciona Posição se couber
                          if (cutDetails.posicao && cutWidth > 20) {
                              line2 += ` P:${cutDetails.posicao}`;
                          }
-                         // Trunca se muito grande
                          if (line2.length > 12 && cutWidth < 25) line2 = line2.substring(0, 10) + "..";
-                         
                          doc.text(line2, currentX + (cutWidth / 2), yPos + 8, { align: 'center' });
                      }
 
-                     // 3. OS e LOCALIZADOR (Centro Baixo)
                      if (cutWidth > 15) {
                         doc.setFontSize(5);
                         let line3 = "";
                         if (cutDetails.os) line3 += `OS:${cutDetails.os} `;
                         if (cutDetails.origin) {
-                             // Tenta abreviar o localizador se for nome de projeto longo
                              let loc = cutDetails.origin.replace('[PROJETO]', '').trim();
                              if (loc.length > 8 && cutWidth < 30) loc = loc.substring(0, 6) + ".";
                              line3 += `L:${loc}`;
@@ -734,7 +723,7 @@ const OtimizadorCorteAco = ({ user }) => {
                  const remainingWidth = bar.remaining * scale;
                  doc.setFillColor(220, 220, 220); doc.rect(currentX, yPos, remainingWidth, barHeight, 'F'); doc.rect(currentX, yPos, remainingWidth, barHeight, 'S');
              }
-             doc.setTextColor(0, 0, 0); yPos += (barHeight + 8); // Pula para a próxima barra
+             doc.setTextColor(0, 0, 0); yPos += (barHeight + 8); 
         });
         yPos += 5;
     });
@@ -743,19 +732,16 @@ const OtimizadorCorteAco = ({ user }) => {
 
   // --- NOVA LÓGICA DE EXECUÇÃO ---
 
-  // 1. Apenas abre o modal
   const handleExecuteProject = () => {
       if (!results) return;
       setShowExecuteModal(true);
   };
 
-  // 2. Lógica real de execução (chamada pelo modal)
   const confirmExecution = async () => {
     if (!results) return;
     setIsProcessing(true);
 
     try {
-        // A. Identificar itens de estoque usados
         const usedCounts = {};
         if (executeOptions.deductStock) {
             results.forEach(group => {
@@ -767,10 +753,8 @@ const OtimizadorCorteAco = ({ user }) => {
             });
         }
 
-        // B. Criar Backup
         await createInventoryBackup("Execução de Projeto");
 
-        // C. Atualizar Inventário (Dar baixa)
         let updatedInventory = inventory.map(item => {
             if (executeOptions.deductStock && usedCounts[item.id]) { 
                 const newQty = item.qty - usedCounts[item.id]; 
@@ -779,13 +763,11 @@ const OtimizadorCorteAco = ({ user }) => {
             return item;
         }).filter(item => item.qty > 0);
 
-        // D. Salvar Sobras (com filtro de tamanho)
         if (executeOptions.saveLeftovers) {
             const discardThreshold = executeOptions.discardLimit === '' ? 0 : parseFloat(executeOptions.discardLimit);
             
             results.forEach(group => {
                 group.bars.forEach(barGroup => {
-                    // Lógica: Salva se for maior que o limite de descarte. 
                     if (barGroup.remaining > discardThreshold) { 
                         const bitola = parseFloat(group.bitola); 
                         const length = parseFloat(barGroup.remaining.toFixed(1)); 
@@ -813,7 +795,6 @@ const OtimizadorCorteAco = ({ user }) => {
             });
         }
 
-        // E. Commit Final
         await updateInventory(updatedInventory);
         
         setShowExecuteModal(false);
@@ -1564,12 +1545,12 @@ const OtimizadorCorteAco = ({ user }) => {
                                                     )}
 
                                                     {/* Tooltip Hover completo: Mostra TUDO */}
-                                                    <div className="absolute inset-0 opacity-0 hover:opacity-100 bg-black/95 flex flex-col items-center justify-center text-[9px] p-1 z-10 pointer-events-none transition-opacity shadow-lg">
+                                                    <div className="absolute inset-0 opacity-0 group-hover:opacity-100 bg-black/95 flex flex-col items-center justify-center text-[9px] p-1 z-20 pointer-events-none transition-opacity shadow-lg">
                                                         <span className="font-bold text-yellow-300 text-sm mb-0.5">{cutLength}cm</span>
                                                         <span className="text-white font-bold">{cutDetails?.elemento || '-'}</span>
                                                         <span className="text-slate-200">Pos: {cutDetails?.posicao || '-'}</span>
                                                         <span className="text-slate-200">OS: {cutDetails?.os || '-'}</span>
-                                                        <span className="text-[8px] text-slate-400 mt-1 uppercase tracking-wide">{cutDetails?.origin || 'Sem Loc.'}</span>
+                                                        <span className="text-[8px] text-slate-400 mt-1 uppercase tracking-wide">{cutDetails?.origin ? `Loc: ${cutDetails.origin}` : 'Sem Loc.'}</span>
                                                     </div>
                                                 </div>
                                             );
