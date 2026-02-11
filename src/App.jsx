@@ -668,7 +668,6 @@ const OtimizadorCorteAco = ({ user }) => {
         doc.setFont("helvetica", "normal"); doc.setFontSize(10);
         
         group.bars.forEach(bar => {
-             // Aumentei o espaçamento para caber mais info
              if (yPos > 255) { doc.addPage(); yPos = 20; }
              const typeText = bar.type === 'nova' ? "BARRA NOVA (1200cm)" : `PONTA ESTOQUE (${bar.originalLength}cm)`;
              doc.setFont("helvetica", "bold"); doc.text(`${bar.count}x  ${typeText}`, 15, yPos);
@@ -677,8 +676,8 @@ const OtimizadorCorteAco = ({ user }) => {
              const scale = 180 / bar.originalLength; 
              let currentX = 15;
              
-             // Altura da barra no PDF aumentada para 12 (era 8) para caber 2 linhas
-             const barHeight = 12;
+             // Altura da barra no PDF aumentada para caber mais linhas (16)
+             const barHeight = 16;
 
              bar.cuts.forEach(cutItem => {
                  // Agora cutItem é GARANTIDAMENTE um objeto {length, details} devido à correção no cutOptimizer
@@ -700,20 +699,32 @@ const OtimizadorCorteAco = ({ user }) => {
                      doc.setFontSize(8); 
                      doc.text(`${cutLength}`, currentX + (cutWidth / 2), yPos + 4, { align: 'center' }); 
                      
-                     // 2. ELEMENTO (Centro Baixo)
-                     if (cutDetails && cutDetails.elemento && cutWidth > 10) {
+                     // 2. ELEMENTO e POSIÇÃO (Centro Meio)
+                     if (cutDetails && cutDetails.elemento && cutWidth > 12) {
                          doc.setFontSize(6);
-                         // Trunca se for muito grande
-                         const elemText = cutDetails.elemento.length > 8 && cutWidth < 20 
-                            ? cutDetails.elemento.substring(0,6) + ".." 
-                            : cutDetails.elemento;
-                         doc.text(elemText, currentX + (cutWidth / 2), yPos + 9, { align: 'center' });
+                         let line2 = cutDetails.elemento;
+                         // Adiciona Posição se couber
+                         if (cutDetails.posicao && cutWidth > 20) {
+                             line2 += ` P:${cutDetails.posicao}`;
+                         }
+                         // Trunca se muito grande
+                         if (line2.length > 12 && cutWidth < 25) line2 = line2.substring(0, 10) + "..";
+                         
+                         doc.text(line2, currentX + (cutWidth / 2), yPos + 8, { align: 'center' });
                      }
 
-                     // 3. POSIÇÃO (Só se sobrar muito espaço)
-                     if (cutDetails && cutDetails.posicao && cutWidth > 25) {
+                     // 3. OS e LOCALIZADOR (Centro Baixo)
+                     if (cutWidth > 15) {
                         doc.setFontSize(5);
-                        doc.text(`Pos:${cutDetails.posicao}`, currentX + (cutWidth / 2), yPos + 11, { align: 'center' });
+                        let line3 = "";
+                        if (cutDetails.os) line3 += `OS:${cutDetails.os} `;
+                        if (cutDetails.origin) {
+                             // Tenta abreviar o localizador se for nome de projeto longo
+                             let loc = cutDetails.origin.replace('[PROJETO]', '').trim();
+                             if (loc.length > 8 && cutWidth < 30) loc = loc.substring(0, 6) + ".";
+                             line3 += `L:${loc}`;
+                        }
+                        if (line3) doc.text(line3.trim(), currentX + (cutWidth / 2), yPos + 12, { align: 'center' });
                      }
                  }
                  currentX += cutWidth;
