@@ -676,74 +676,140 @@ const OtimizadorCorteAco = ({ user }) => {
     if (!window.jspdf || !results) return alert("Biblioteca PDF não carregada.");
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
+    
+    // Configurações Iniciais
+    const pageWidth = doc.internal.pageSize.width;
+    const margin = 14;
     let yPos = 20;
-    doc.setFontSize(18); doc.text("Plano de Corte", 105, yPos, { align: 'center' }); yPos += 15;
-    doc.setFontSize(10); doc.text(`Data: ${new Date().toLocaleDateString()}`, 105, yPos, { align: 'center' }); yPos += 15;
 
-    results.forEach(group => {
+    // Cabeçalho do Documento
+    doc.setFontSize(18);
+    doc.setTextColor(30, 41, 59); // Slate-800
+    doc.text("Plano de Corte - Produção", pageWidth / 2, yPos, { align: 'center' });
+    yPos += 10;
+    
+    doc.setFontSize(10);
+    doc.setTextColor(100, 116, 139); // Slate-500
+    doc.text(`Gerado em: ${new Date().toLocaleString()}`, pageWidth / 2, yPos, { align: 'center' });
+    yPos += 15;
+
+    results.forEach((group) => {
+        // Verifica espaço para o título da bitola
         if (yPos > 270) { doc.addPage(); yPos = 20; }
-        doc.setFillColor(240, 240, 240); doc.rect(10, yPos - 5, 190, 8, 'F');
-        doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.text(`Bitola: ${parseFloat(group.bitola).toFixed(1)} mm`, 15, yPos); yPos += 10;
-        doc.setFont("helvetica", "normal"); doc.setFontSize(10);
-        
-        group.bars.forEach(bar => {
-             if (yPos > 255) { doc.addPage(); yPos = 20; }
-             const typeText = bar.type === 'nova' ? "BARRA NOVA (1200cm)" : `PONTA ESTOQUE (${bar.originalLength}cm)`;
-             doc.setFont("helvetica", "bold"); doc.text(`${bar.count}x  ${typeText}`, 15, yPos);
-             doc.setFont("helvetica", "normal"); doc.text(`Sobra: ${bar.remaining.toFixed(0)}cm`, 150, yPos, { align: 'right' }); yPos += 4;
-             
-             const scale = 180 / bar.originalLength; 
-             let currentX = 15;
-             const barHeight = 16;
 
+        // Cabeçalho da Bitola (Faixa Cinza)
+        doc.setFillColor(241, 245, 249); // Slate-100
+        doc.rect(margin, yPos - 6, pageWidth - (margin * 2), 10, 'F');
+        doc.setFontSize(12);
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(30, 41, 59);
+        doc.text(`BITOLA: ${parseFloat(group.bitola).toFixed(1)} mm`, margin + 5, yPos);
+        yPos += 12;
+
+        group.bars.forEach((bar, index) => {
+             // Se estiver muito no fim da página, pula antes de começar uma nova barra
+             if (yPos > 250) { doc.addPage(); yPos = 20; }
+
+             // 1. INFO DA BARRA (Título)
+             const typeText = bar.type === 'nova' ? "BARRA NOVA (12m)" : `PONTA DE ESTOQUE (${bar.originalLength}cm)`;
+             doc.setFontSize(10);
+             doc.setFont("helvetica", "bold");
+             doc.setTextColor(0, 0, 0);
+             doc.text(`${bar.count}x  ${typeText}`, margin, yPos);
+             
+             // Info de Sobra (lado direito)
+             doc.setFont("helvetica", "normal");
+             const sobraColor = bar.remaining > 100 ? [22, 163, 74] : [220, 38, 38]; // Verde ou Vermelho
+             doc.setTextColor(...sobraColor);
+             doc.text(`Sobra: ${bar.remaining.toFixed(1)}cm`, pageWidth - margin, yPos, { align: 'right' });
+             yPos += 5;
+
+             // 2. DESENHO DA BARRA (VISUALIZAÇÃO)
+             const barWidth = pageWidth - (margin * 2);
+             const barHeight = 12;
+             const scale = barWidth / bar.originalLength;
+             let currentX = margin;
+
+             // Desenha os cortes
              bar.cuts.forEach(cutItem => {
                  const cutLength = cutItem.length;
-                 const cutDetails = cutItem.details || {};
                  const cutWidth = cutLength * scale;
                  
-                 doc.setFillColor(59, 130, 246); 
-                 doc.rect(currentX, yPos, cutWidth, barHeight, 'F'); 
-                 doc.rect(currentX, yPos, cutWidth, barHeight, 'S');
-                 
-                 if (cutWidth > 6) { 
-                     doc.setTextColor(255, 255, 255); 
-                     doc.setFontSize(8); 
-                     doc.text(`${cutLength}`, currentX + (cutWidth / 2), yPos + 4, { align: 'center' }); 
-                     
-                     if (cutDetails && cutDetails.elemento && cutWidth > 12) {
-                         doc.setFontSize(6);
-                         let line2 = cutDetails.elemento;
-                         if (cutDetails.posicao && cutWidth > 20) {
-                             line2 += ` P:${cutDetails.posicao}`;
-                         }
-                         if (line2.length > 12 && cutWidth < 25) line2 = line2.substring(0, 10) + "..";
-                         doc.text(line2, currentX + (cutWidth / 2), yPos + 8, { align: 'center' });
-                     }
+                 // Retângulo Azul
+                 doc.setFillColor(59, 130, 246); // Blue-500
+                 doc.setDrawColor(255, 255, 255);
+                 doc.rect(currentX, yPos, cutWidth, barHeight, 'FD');
 
-                     if (cutWidth > 15) {
-                        doc.setFontSize(5);
-                        let line3 = "";
-                        if (cutDetails.os) line3 += `OS:${cutDetails.os} `;
-                        if (cutDetails.origin) {
-                             let loc = cutDetails.origin.replace('[PROJETO]', '').trim();
-                             if (loc.length > 8 && cutWidth < 30) loc = loc.substring(0, 6) + ".";
-                             line3 += `L:${loc}`;
-                        }
-                        if (line3) doc.text(line3.trim(), currentX + (cutWidth / 2), yPos + 12, { align: 'center' });
-                     }
+                 // Texto dentro da barra (SÓ SE COUBER)
+                 // Regra: Só desenha texto se o corte tiver mais de 15mm visuais no papel
+                 if (cutWidth > 15) {
+                     doc.setTextColor(255, 255, 255);
+                     doc.setFontSize(8);
+                     doc.setFont("helvetica", "bold");
+                     doc.text(`${cutLength}`, currentX + (cutWidth / 2), yPos + 7, { align: 'center' });
                  }
+
                  currentX += cutWidth;
              });
-             
+
+             // Desenha a sobra (Cinza)
              if (bar.remaining > 0) {
                  const remainingWidth = bar.remaining * scale;
-                 doc.setFillColor(220, 220, 220); doc.rect(currentX, yPos, remainingWidth, barHeight, 'F'); doc.rect(currentX, yPos, remainingWidth, barHeight, 'S');
+                 doc.setFillColor(203, 213, 225); // Slate-300
+                 doc.rect(currentX, yPos, remainingWidth, barHeight, 'FD');
+                 
+                 // Texto na sobra se couber
+                 if (remainingWidth > 20) {
+                    doc.setTextColor(71, 85, 105);
+                    doc.setFontSize(7);
+                    doc.text("SOBRA", currentX + (remainingWidth / 2), yPos + 7, { align: 'center' });
+                 }
              }
-             doc.setTextColor(0, 0, 0); yPos += (barHeight + 8); 
+             
+             yPos += barHeight + 5; // Espaço após o desenho
+
+             // 3. TABELA DE CORTES (A Mágica acontece aqui)
+             // Prepara os dados para o autoTable
+             const tableBody = bar.cuts.map((cut, i) => [
+                 (i + 1), // Item #
+                 `${cut.length} cm`,
+                 cut.details?.elemento || '-',
+                 cut.details?.posicao || '-',
+                 cut.details?.os || '-',
+                 (cut.details?.origin || '').replace('[PROJETO]', '').substring(0, 15) // Origem resumida
+             ]);
+
+             // Gera a tabela
+             doc.autoTable({
+                 startY: yPos,
+                 head: [['#', 'Comp.', 'Elemento', 'Pos.', 'OS', 'Ref.']],
+                 body: tableBody,
+                 theme: 'grid',
+                 margin: { left: margin, right: margin },
+                 styles: { fontSize: 8, cellPadding: 2 },
+                 headStyles: { fillColor: [71, 85, 105], textColor: 255 }, // Slate-700
+                 columnStyles: {
+                     0: { cellWidth: 10, halign: 'center' }, // #
+                     1: { cellWidth: 20, fontStyle: 'bold', halign: 'center' }, // Comp
+                     // As outras colunas se ajustam
+                 },
+                 // Importante: Atualiza o yPos global após a tabela ser desenhada
+                 didDrawPage: (data) => {
+                     // Se a tabela quebrar página, atualiza o yPos para o topo da próxima
+                     yPos = data.cursor.y; 
+                 }
+             });
+
+             // Pega a posição final da tabela para continuar o loop
+             yPos = doc.lastAutoTable.finalY + 15; // +15 de respiro para a próxima barra
         });
-        yPos += 5;
+        
+        yPos += 10; // Espaço extra entre bitolas
     });
-    doc.save(`Plano_Corte_${new Date().toISOString().slice(0,10)}.pdf`);
+
+    // Salva o arquivo
+    const fileName = `Plano_Corte_Producao_${new Date().toISOString().slice(0,10)}.pdf`;
+    doc.save(fileName);
   };
 
   // --- NOVA LÓGICA DE EXECUÇÃO ---
