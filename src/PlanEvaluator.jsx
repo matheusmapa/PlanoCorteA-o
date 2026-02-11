@@ -41,7 +41,7 @@ const PlanEvaluator = ({ savedPlans, onDeletePlan }) => {
       group.bars.forEach(barGroup => {
         const count = barGroup.count;
         const barLength = barGroup.originalLength;
-        const cutsLength = barGroup.cuts.reduce((a, b) => a + b, 0);
+        const cutsLength = barGroup.cuts.reduce((acc, cut) => acc + (typeof cut === 'number' ? cut : cut.length), 0);
         const remaining = barGroup.remaining;
         
         // 1. Quantidades e Origem
