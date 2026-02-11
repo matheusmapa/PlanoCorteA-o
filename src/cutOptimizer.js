@@ -20,7 +20,7 @@ export const calculateCutPlan = (items, inventory, barraPadrao = 1200, perdaCort
                     elemento: item.elemento || '',
                     posicao: item.posicao || '',
                     os: item.os || '',
-                    origin: item.origin || ''
+                    origin: item.origin || '' // Localizador
                 }
             });
         }
@@ -123,14 +123,11 @@ export const calculateCutPlan = (items, inventory, barraPadrao = 1200, perdaCort
             if (existingGroup) {
                 existingGroup.count++;
                 existingGroup.ids.push(bar.id);
-                // Adiciona os detalhes desta barra nova ao histórico do grupo (opcional, para auditoria futura)
                 existingGroup.allDetails.push(combined.map(c => c.details));
             } else {
                 groupedBars.push({ 
                     ...bar, 
-                    // AQUI ESTÁ A CORREÇÃO: 'cuts' agora carrega o objeto completo {length, details}
-                    // Usamos os detalhes da primeira barra como representação visual do grupo
-                    cuts: combined, 
+                    cuts: combined, // Objeto completo {length, details}
                     count: 1, 
                     signature: signature, 
                     ids: [bar.id],
