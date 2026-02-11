@@ -105,30 +105,36 @@ export const calculateCutPlan = (items, inventory, barraPadrao = 1200, perdaCort
         const groupedBars = [];
         
         barsUsed.forEach(bar => {
-            // Ordenamos os cortes por tamanho, mas precisamos levar os detalhes junto
-            const combined = bar.cuts.map((len, idx) => ({ len, det: bar.cutsDetails[idx] }));
-            combined.sort((a, b) => b.len - a.len);
+            // Unificamos Comprimento + Detalhes num objeto único para facilitar
+            const combined = bar.cuts.map((len, idx) => ({ 
+                length: len, 
+                details: bar.cutsDetails[idx] 
+            }));
+            
+            // Ordena do maior para o menor corte
+            combined.sort((a, b) => b.length - a.length);
 
-            const sortedCuts = combined.map(c => c.len);
-            const sortedDetails = combined.map(c => c.det);
-
-            const signature = `${bar.type}-${bar.originalLength}-${sortedCuts.join(',')}`;
+            // Cria assinatura baseada APENAS nos comprimentos (para agrupar visualmente)
+            const sortedLengths = combined.map(c => c.length);
+            const signature = `${bar.type}-${bar.originalLength}-${sortedLengths.join(',')}`;
+            
             const existingGroup = groupedBars.find(g => g.signature === signature);
 
             if (existingGroup) {
                 existingGroup.count++;
                 existingGroup.ids.push(bar.id);
-                // Adiciona os detalhes desta barra nova ao grupo
-                existingGroup.allDetails.push(sortedDetails);
+                // Adiciona os detalhes desta barra nova ao histórico do grupo (opcional, para auditoria futura)
+                existingGroup.allDetails.push(combined.map(c => c.details));
             } else {
                 groupedBars.push({ 
                     ...bar, 
-                    cuts: sortedCuts, 
+                    // AQUI ESTÁ A CORREÇÃO: 'cuts' agora carrega o objeto completo {length, details}
+                    // Usamos os detalhes da primeira barra como representação visual do grupo
+                    cuts: combined, 
                     count: 1, 
                     signature: signature, 
                     ids: [bar.id],
-                    // Inicia lista de detalhes (Array de Arrays)
-                    allDetails: [sortedDetails] 
+                    allDetails: [combined.map(c => c.details)] 
                 });
             }
         });
