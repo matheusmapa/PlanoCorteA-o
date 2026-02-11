@@ -681,8 +681,9 @@ const OtimizadorCorteAco = ({ user }) => {
              const barHeight = 12;
 
              bar.cuts.forEach(cutItem => {
-                 const cutLength = typeof cutItem === 'object' ? cutItem.length : cutItem;
-                 const cutDetails = typeof cutItem === 'object' ? cutItem.details : {};
+                 // Agora cutItem é GARANTIDAMENTE um objeto {length, details} devido à correção no cutOptimizer
+                 const cutLength = cutItem.length;
+                 const cutDetails = cutItem.details || {};
                  
                  const cutWidth = cutLength * scale;
                  
