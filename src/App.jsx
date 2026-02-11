@@ -391,16 +391,43 @@ const OtimizadorCorteAco = ({ user }) => {
       const planName = window.prompt("Nome para este Plano de Corte (ex: Lote A - 03/02):");
       if (!planName) return;
       try {
+          // --- FIX 2: SANITIZAÇÃO DO PLANO DE CORTE ---
+          // O Firestore não aceita Arrays de Arrays (que é o caso do 'allDetails' gerado pelo otimizador)
+          // Também removemos undefined para evitar crashes.
+          const sanitizedResults = results.map(group => ({
+              ...group,
+              bars: group.bars.map(bar => {
+                  // Separamos 'allDetails' (problemático) do resto da barra
+                  const { allDetails, ...cleanBar } = bar; 
+                  
+                  return {
+                      ...cleanBar,
+                      // Garantir que não existam undefineds dentro de cuts
+                      cuts: cleanBar.cuts.map(cut => ({
+                          length: cut.length || 0,
+                          details: {
+                              elemento: cut.details?.elemento || '',
+                              posicao: cut.details?.posicao || '',
+                              os: cut.details?.os || '',
+                              origin: cut.details?.origin || ''
+                          }
+                      })),
+                      // Se houver outros campos como ids, garantir array
+                      ids: cleanBar.ids || []
+                  };
+              })
+          }));
+
           await addDoc(collection(db, 'users', user.uid, 'cutPlans'), {
               name: planName,
-              results: results,
+              results: sanitizedResults,
               createdAt: serverTimestamp()
           });
           alert("Plano salvo com sucesso!");
           setIsSidebarOpen(true);
       } catch (error) {
           console.error("Erro ao salvar plano:", error);
-          alert("Erro ao salvar o plano.");
+          alert("Erro ao salvar o plano. Verifique o console.");
       }
   };
 
@@ -430,10 +457,10 @@ const OtimizadorCorteAco = ({ user }) => {
       const projectName = window.prompt("Nome do Projeto (ex: Obra Residencial Silva):");
       if (!projectName) return;
       try {
-          // --- HIGIENIZAÇÃO DOS DADOS ANTES DE SALVAR (CORREÇÃO DE BUGS FIREBASE) ---
+          // --- FIX 3: HIGIENIZAÇÃO DE PROJETOS ---
           const sanitizedItems = items.map(item => ({
               ...item,
-              elemento: item.elemento || '', // Garante string vazia se for undefined
+              elemento: item.elemento || '', 
               posicao: item.posicao || '',
               os: item.os || '',
               origin: item.origin || '',
@@ -553,7 +580,7 @@ const OtimizadorCorteAco = ({ user }) => {
 
             const itemsFromThisFile = parseTextToItems(text, file.name);
             
-            // --- CORREÇÃO: Detectar qual origem foi usada nesses itens ---
+            // --- FIX 1: Detectar qual origem foi usada para vincular ao arquivo ---
             const detectedOrigin = itemsFromThisFile.length > 0 ? itemsFromThisFile[0].origin : file.name;
 
             allExtractedItems = [...allExtractedItems, ...itemsFromThisFile];
@@ -561,8 +588,7 @@ const OtimizadorCorteAco = ({ user }) => {
             const fileIndex = newUploadedFiles.findIndex(f => f.name === file.name && f.type === 'file');
             if (fileIndex !== -1) {
                 newUploadedFiles[fileIndex].status = 'ok';
-                // Guardamos essa info no arquivo para usar na remoção depois
-                newUploadedFiles[fileIndex].associatedOrigin = detectedOrigin;
+                newUploadedFiles[fileIndex].associatedOrigin = detectedOrigin; // Salva o vinculo
             }
 
         } catch (error) {
@@ -581,12 +607,12 @@ const OtimizadorCorteAco = ({ user }) => {
   const removeFileOrProject = (fileData) => {
       setUploadedFiles(prev => prev.filter(f => f.id !== fileData.id));
       
-      // --- CORREÇÃO: Usar a origem correta para remover os itens ---
+      // --- FIX 1 (Continuação): Remover usando a origem correta ---
       let originToRemove;
       if (fileData.type === 'project') {
           originToRemove = fileData.originName;
       } else {
-          // Se for arquivo, tenta pegar a origem detectada (se existir), senão usa o nome do arquivo
+          // Se for arquivo, usa a origem detectada pelo PDFProcessor
           originToRemove = fileData.associatedOrigin || fileData.name;
       }
       
@@ -1245,7 +1271,7 @@ const OtimizadorCorteAco = ({ user }) => {
 
   {/* 2. Estoque */}
   <button onClick={() => setActiveTab('inventory')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'inventory' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
-    <Clipboard size={18} /> Pontas ({inventory.reduce((acc, i) => acc + i.qty, 0)})
+    <Clipboard size={18} /> Estoque ({inventory.reduce((acc, i) => acc + i.qty, 0)})
   </button>
 
  {/* 3. Resultado */}
@@ -1432,84 +1458,6 @@ const OtimizadorCorteAco = ({ user }) => {
                 </button>
             </div>
           </div>
-        )}
-
-        {/* --- TAB: INVENTORY --- */}
-        {activeTab === 'inventory' && (
-           <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 space-y-4 animate-fade-in">
-              <div className="flex justify-between items-center flex-wrap gap-4">
-                  <h2 className="text-lg font-semibold text-slate-700">Estoque de Pontas</h2>
-                  <div className="flex gap-2 flex-wrap">
-                    {/* Botão de Histórico de Backup */}
-                    <button onClick={fetchBackups} className="flex items-center gap-1 bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-md hover:bg-amber-200 text-sm font-medium transition-colors">
-                        <History size={16} /> Histórico
-                    </button>
-                    <button onClick={clearInventory} className="text-red-500 text-sm hover:underline px-2">Zerar</button>
-                    <button onClick={openAddStockModal} className="flex items-center gap-1 bg-green-600 text-white px-3 py-1.5 rounded-md hover:bg-green-700 text-sm"><Plus size={16} /> Adicionar</button>
-                  </div>
-              </div>
-              {renderBitolaTabs(activeInventoryBitola, setActiveInventoryBitola, BITOLAS_COMERCIAIS)}
-              <div className="overflow-x-auto max-h-[500px] overflow-y-auto border border-slate-200 rounded-b-lg">
-                <table className="w-full text-sm text-left">
-                    <thead className="text-xs text-slate-500 uppercase bg-yellow-50 sticky top-0">
-                        <tr><th className="px-4 py-3">Bitola</th><th className="px-4 py-3">Qtd</th><th className="px-4 py-3">Comp.</th><th className="px-4 py-3">Origem</th><th className="px-4 py-3 text-right">Ação</th></tr>
-                    </thead>
-                    <tbody>
-                        {(activeInventoryBitola === 'todas' ? inventory : inventory.filter(i => Math.abs(i.bitola - parseFloat(activeInventoryBitola)) < 0.01))
-                            .sort((a,b) => b.bitola - a.bitola).map(item => (
-                            <tr key={item.id} className="border-b border-slate-100 hover:bg-yellow-50">
-                                <td className="px-4 py-2">{item.bitola.toFixed(1)} mm</td>
-                                <td className="px-4 py-2"><input type="number" value={item.qty} onChange={(e) => updateInventoryItem(item.id, 'qty', parseInt(e.target.value))} className="w-16 p-1 border rounded bg-transparent font-bold text-slate-700 text-center" /></td>
-                                <td className="px-4 py-2">{item.length} cm</td>
-                                <td className="px-4 py-2 text-xs text-slate-400 uppercase">{item.source || 'Manual'}</td>
-                                <td className="px-4 py-2 text-right"><button onClick={() => removeInventoryItem(item.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button></td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-              </div>
-           </div>
-        )}
-
-        {/* --- MODAIS (ADICIONAR ITEM MANUAL / ESTOQUE) --- */}
-        {(showManualInputModal || showAddStockModal) && (
-            <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm px-4">
-                <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm animate-in fade-in zoom-in-95 duration-200">
-                    <div className="flex justify-between items-center mb-4 border-b pb-2">
-                        <h3 className="text-lg font-bold text-slate-800">{showManualInputModal ? "Adicionar Peça" : "Adicionar ao Estoque"}</h3>
-                        <button onClick={() => {setShowManualInputModal(false); setShowAddStockModal(false);}}><X size={20} className="text-slate-400" /></button>
-                    </div>
-                    <div className="space-y-4">
-                        <div>
-                            <label className="block text-sm font-medium text-slate-600 mb-1">Bitola</label>
-                            <select value={showManualInputModal ? newManualItemData.bitola : newStockItemData.bitola} onChange={(e) => {
-                                const val = e.target.value;
-                                showManualInputModal ? setNewManualItemData({...newManualItemData, bitola: val}) : setNewStockItemData({...newStockItemData, bitola: val});
-                            }} className="w-full p-2 border rounded">{BITOLAS_COMERCIAIS.map(b => <option key={b} value={b}>{b} mm</option>)}</select>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-slate-600 mb-1">Comprimento (cm)</label>
-                                <input type="number" value={showManualInputModal ? newManualItemData.length : newStockItemData.length} onChange={(e) => {
-                                    const val = e.target.value;
-                                    showManualInputModal ? setNewManualItemData({...newManualItemData, length: val}) : setNewStockItemData({...newStockItemData, length: val});
-                                }} className="w-full p-2 border rounded" />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-slate-600 mb-1">Quantidade</label>
-                                <input type="number" value={showManualInputModal ? newManualItemData.qty : newStockItemData.qty} onChange={(e) => {
-                                    const val = e.target.value;
-                                    showManualInputModal ? setNewManualItemData({...newManualItemData, qty: val}) : setNewStockItemData({...newStockItemData, qty: val});
-                                }} className="w-full p-2 border rounded" />
-                            </div>
-                        </div>
-                    </div>
-                    <div className="mt-6 flex justify-end gap-2">
-                        <button onClick={() => {setShowManualInputModal(false); setShowAddStockModal(false);}} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded">Cancelar</button>
-                        <button onClick={showManualInputModal ? confirmAddManualItem : confirmAddStockItem} className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 font-medium">Salvar</button>
-                    </div>
-                </div>
-            </div>
         )}
 
         {/* --- TAB: RESULTS --- */}
