@@ -9,7 +9,7 @@ const StrategyAnalyzer = ({ projects, inventory, onClose, onLoadStrategy }) => {
   // --- ESTADOS INTERNOS ---
   const [step, setStep] = useState('select'); // 'select' ou 'analyze'
   const [selectedIds, setSelectedIds] = useState([]);
-  const [useLeftovers, setUseLeftovers] = useState(true); // <--- NOVO ESTADO: Opção de usar estoque
+  const [useLeftovers, setUseLeftovers] = useState(true); 
   const [analysis, setAnalysis] = useState(null);
   const [isComputing, setIsComputing] = useState(false);
 
@@ -45,7 +45,8 @@ const StrategyAnalyzer = ({ projects, inventory, onClose, onLoadStrategy }) => {
         
         plan.forEach(group => {
             group.bars.forEach(bar => {
-                const cutsLen = bar.cuts.reduce((a, b) => a + b, 0);
+                // CORREÇÃO AQUI: Verifica se é número ou objeto antes de somar
+                const cutsLen = bar.cuts.reduce((a, b) => a + (typeof b === 'number' ? b : b.length), 0);
                 
                 // Contabiliza barras novas vs estoque
                 if (bar.type === 'nova') {
@@ -71,7 +72,8 @@ const StrategyAnalyzer = ({ projects, inventory, onClose, onLoadStrategy }) => {
 
       combinedPlan.forEach(group => {
           group.bars.forEach(bar => {
-              const cutsLen = bar.cuts.reduce((a, b) => a + b, 0);
+              // CORREÇÃO AQUI TAMBÉM
+              const cutsLen = bar.cuts.reduce((a, b) => a + (typeof b === 'number' ? b : b.length), 0);
               
               if (bar.type === 'nova') {
                   combinedMetrics.totalBars += bar.count;
