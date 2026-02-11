@@ -425,22 +425,18 @@ const OtimizadorCorteAco = ({ user }) => {
   };
 
   // --- FUNÇÕES: PROJETOS DE DEMANDA (INPUT) ---
-  // Em src/App.jsx
-
   const handleSaveProject = async () => {
       if (items.length === 0) return alert("A lista de corte está vazia. Nada para salvar.");
       const projectName = window.prompt("Nome do Projeto (ex: Obra Residencial Silva):");
       if (!projectName) return;
-      
       try {
-          // --- CORREÇÃO 3: Higienizar dados para evitar 'undefined' no Firebase ---
+          // --- HIGIENIZAÇÃO DOS DADOS ANTES DE SALVAR (CORREÇÃO DE BUGS FIREBASE) ---
           const sanitizedItems = items.map(item => ({
               ...item,
               elemento: item.elemento || '', // Garante string vazia se for undefined
               posicao: item.posicao || '',
               os: item.os || '',
               origin: item.origin || '',
-              // Garante segurança nos números também
               bitola: item.bitola || 0,
               qty: item.qty || 0,
               length: item.length || 0
@@ -448,14 +444,14 @@ const OtimizadorCorteAco = ({ user }) => {
 
           await addDoc(collection(db, 'users', user.uid, 'projects'), {
               name: projectName,
-              items: sanitizedItems, // Envia a lista tratada
+              items: sanitizedItems,
               createdAt: serverTimestamp()
           });
           alert("Projeto salvo com sucesso! Confira na aba lateral.");
           setIsSidebarOpen(true);
       } catch (error) {
           console.error("Erro ao salvar:", error);
-          alert("Erro ao salvar projeto. Verifique o console.");
+          alert("Erro ao salvar projeto.");
       }
   };
 
@@ -548,28 +544,28 @@ const OtimizadorCorteAco = ({ user }) => {
         setUploadedFiles([...newUploadedFiles]);
 
         try {
-        let text = "";
-        if (file.type === "application/pdf") {
-            text = await extractTextFromPDF(file);
-        } else {
-            text = await file.text();
-        }
+            let text = "";
+            if (file.type === "application/pdf") {
+                text = await extractTextFromPDF(file);
+            } else {
+                text = await file.text();
+            }
 
-        const itemsFromThisFile = parseTextToItems(text, file.name);
-        
-        // --- CORREÇÃO 1: Detectar qual origem foi usada nesses itens ---
-        const detectedOrigin = itemsFromThisFile.length > 0 ? itemsFromThisFile[0].origin : file.name;
+            const itemsFromThisFile = parseTextToItems(text, file.name);
+            
+            // --- CORREÇÃO: Detectar qual origem foi usada nesses itens ---
+            const detectedOrigin = itemsFromThisFile.length > 0 ? itemsFromThisFile[0].origin : file.name;
 
-        allExtractedItems = [...allExtractedItems, ...itemsFromThisFile];
-        
-        const fileIndex = newUploadedFiles.findIndex(f => f.name === file.name && f.type === 'file');
-        if (fileIndex !== -1) {
-             newUploadedFiles[fileIndex].status = 'ok';
-             // Guardamos essa info no arquivo para usar na remoção depois
-             newUploadedFiles[fileIndex].associatedOrigin = detectedOrigin; 
-        }
+            allExtractedItems = [...allExtractedItems, ...itemsFromThisFile];
+            
+            const fileIndex = newUploadedFiles.findIndex(f => f.name === file.name && f.type === 'file');
+            if (fileIndex !== -1) {
+                newUploadedFiles[fileIndex].status = 'ok';
+                // Guardamos essa info no arquivo para usar na remoção depois
+                newUploadedFiles[fileIndex].associatedOrigin = detectedOrigin;
+            }
 
-    } catch (error) { {
+        } catch (error) {
             console.error("Erro:", error);
             const fileIndex = newUploadedFiles.findIndex(f => f.name === file.name && f.type === 'file');
             if (fileIndex !== -1) newUploadedFiles[fileIndex].status = 'erro';
@@ -585,9 +581,8 @@ const OtimizadorCorteAco = ({ user }) => {
   const removeFileOrProject = (fileData) => {
       setUploadedFiles(prev => prev.filter(f => f.id !== fileData.id));
       
-      // --- CORREÇÃO 2: Usar a origem correta para remover os itens ---
+      // --- CORREÇÃO: Usar a origem correta para remover os itens ---
       let originToRemove;
-      
       if (fileData.type === 'project') {
           originToRemove = fileData.originName;
       } else {
@@ -1250,7 +1245,7 @@ const OtimizadorCorteAco = ({ user }) => {
 
   {/* 2. Estoque */}
   <button onClick={() => setActiveTab('inventory')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'inventory' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
-    <Clipboard size={18} /> Estoque ({inventory.reduce((acc, i) => acc + i.qty, 0)})
+    <Clipboard size={18} /> Pontas ({inventory.reduce((acc, i) => acc + i.qty, 0)})
   </button>
 
  {/* 3. Resultado */}
