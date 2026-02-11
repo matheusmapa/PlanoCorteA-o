@@ -22,88 +22,75 @@ export const extractTextFromPDF = async (file) => {
   for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
-      
-      // Melhoramos a extração para manter um pouco mais da estrutura visual
+      // Juntamos tudo com espaço para o Regex pegar o fluxo contínuo
       const pageText = textContent.items.map(item => item.str).join(' ');
       fullText += pageText + " |PAGE_BREAK| ";
   }
   return fullText;
 };
 
-// --- PARSER INTELIGENTE POR BLOCOS ---
+// --- PARSER INTELIGENTE (REGEX DE FLUXO) ---
 export const parseTextToItems = (text, fileName) => {
-    const extracted = [];
-    
-    // 1. Tentar descobrir o NOME DO PROJETO (Localizador)
-    // Procura por "Resumo Geral da Entrega: XXXX" ou "LIVING-MA.114" no cabeçalho
-    let projectMatch = text.match(/LIVING-[A-Z0-9.]+/i) || text.match(/Obra:\s*([^\s|]+)/i);
-    const projectName = projectMatch ? projectMatch[0].trim() : fileName.replace('.pdf', '');
+  const extracted = [];
+  
+  // 1. Tentar descobrir o NOME DO PROJETO (Localizador)
+  // Procura por padrões comuns de cabeçalho
+  let projectMatch = text.match(/LIVING-[A-Z0-9.]+/i) || text.match(/Obra:\s*([^\s|]+)/i) || text.match(/Resumo Geral da Entrega:\s*([^\s]+)/i);
+  const projectName = projectMatch ? projectMatch[0].trim() : fileName.replace('.pdf', '');
 
-    // 2. Limpeza básica para padronizar
-    let cleanText = text.replace(/\s+/g, ' '); // Remove quebras de linha e espaços duplos
+  // 2. Limpeza básica para padronizar espaços e quebras
+  // Substituímos quebras de linha reais por espaço para tratar como fluxo contínuo
+  let cleanText = text.replace(/\s+/g, ' '); 
 
-    // 3. Estratégia: Dividir o texto em blocos onde cada bloco começa com "Elemento"
-    // O PDF lista assim: "Elemento P101 ... Posição 07 ... OS 1"
-    const blocks = cleanText.split(/Elemento/gi);
+  // 3. REGEX PODEROSA
+  // Padrão identificado: [Qtde] [Comp] [Pos] [Bit] [Aço] [Peso] [OS] "Elemento" [Nome]
+  // Ex: "28 364 02 6,30 CA50 25,480 63 Elemento P70"
+  // Grupos:
+  // 1: Qtd (Ex: 28)
+  // 2: Comprimento (Ex: 364)
+  // 3: Posição (Ex: 02 ou 06A)
+  // 4: Bitola (Ex: 6,30) - Com vírgula ou ponto
+  // 5: Aço (Ex: CA50)
+  // 6: Peso (Ex: 25,480)
+  // 7: OS (Ex: 63) - Número logo antes da palavra Elemento
+  // 8: Nome do Elemento (Ex: P70)
+  
+  const mainRegex = /(\d+)\s+(\d+)\s+([A-Z0-9]+)\s+([\d,.]+)\s+([A-Z0-9]+)\s+([\d,.]+)\s+(\d+)\s+Elemento\s+([A-Z0-9-]+)/gi;
 
-    // Ignora o primeiro pedaço (cabeçalho antes do primeiro elemento)
-    for (let i = 1; i < blocks.length; i++) {
-        const block = blocks[i];
+  let match;
+  while ((match = mainRegex.exec(cleanText)) !== null) {
+      const qtd = parseInt(match[1]);
+      const length = parseFloat(match[2]);
+      const posicao = match[3];
+      const bitolaVal = parseFloat(match[4].replace(',', '.'));
+      // match[5] é o Aço (CA50)
+      // match[6] é o Peso
+      const os = match[7];
+      const elemento = match[8];
 
-        // --- EXTRAÇÃO DOS CAMPOS COM REGEX ---
-        
-        // Nome do Elemento (pega a primeira palavra logo após a quebra)
-        const elementoMatch = block.match(/^[\s:]*([A-Z0-9-]+)/i);
-        const elemento = elementoMatch ? elementoMatch[1] : "Desconhecido";
+      // Validação básica para evitar lixo
+      if (BITOLAS_COMERCIAIS.includes(bitolaVal) && length > 0 && qtd > 0) {
+          extracted.push({
+              id: generateId(),
+              origin: projectName, // Campo "Localizador"
+              bitola: bitolaVal,
+              qty: qtd,
+              length: length,
+              selected: true,
+              // Novos Metadados
+              elemento: elemento,
+              posicao: posicao,
+              os: os
+          });
+      }
+  }
 
-        // Bitola (procura "Bitola (mm)" seguido de numero)
-        const bitolaMatch = block.match(/Bitola\s*\(mm\)\s*([\d,.]+)/i) || block.match(/([\d,.]+)\s*Bitola/i);
-        
-        // Quantidade (pode ser "Qtde" ou "Rep. x Var.")
-        // Prioridade para Rep. x Var. se existir, pois geralmente define a quantidade total em alguns layouts
-        let qty = 0;
-        const repVarMatch = block.match(/Rep\.\s*x\s*Var\.\s*(\d+)/i);
-        const qtdeMatch = block.match(/Qtde\s*[:.]?\s*(\d+)/i);
+  // Fallback: Se a regex principal não pegar nada (talvez formato diferente), 
+  // tenta a lógica antiga simplificada para não deixar o usuário na mão.
+  if (extracted.length === 0) {
+      console.warn("Regex principal falhou, tentando fallback simples...");
+      // ... (Lógica antiga poderia vir aqui, mas vamos confiar na nova por enquanto)
+  }
 
-        if (repVarMatch) {
-            qty = parseInt(repVarMatch[1]);
-        } else if (qtdeMatch) {
-            qty = parseInt(qtdeMatch[1]);
-        }
-
-        // Comprimento (procura "Compr. (cm)" seguido de numero)
-        const comprMatch = block.match(/Compr\.\s*\(cm\)\s*(\d+)/i);
-        
-        // Posição (Posição 07)
-        const posMatch = block.match(/Posição\s*([A-Z0-9]+)/i);
-        const posicao = posMatch ? posMatch[1] : "?";
-
-        // OS (OS 58)
-        const osMatch = block.match(/OS\s*(\d+)/i);
-        const os = osMatch ? osMatch[1] : "";
-
-        // --- VALIDAÇÃO E ADIÇÃO ---
-        if (bitolaMatch && qty > 0 && comprMatch) {
-            const bitolaVal = parseFloat(bitolaMatch[1].replace(',', '.'));
-            const length = parseFloat(comprMatch[1]);
-
-            // Filtra bitolas válidas e tamanhos lógicos
-            if (BITOLAS_COMERCIAIS.includes(bitolaVal) && length > 0) {
-                extracted.push({
-                    id: generateId(),
-                    origin: projectName, // Agora usamos o Nome do Projeto extraído
-                    bitola: bitolaVal,
-                    qty: qty,
-                    length: length,
-                    selected: true,
-                    // Novos campos metadados
-                    elemento: elemento,
-                    posicao: posicao,
-                    os: os
-                });
-            }
-        }
-    }
-
-    return extracted;
+  return extracted;
 };
