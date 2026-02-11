@@ -730,7 +730,7 @@ const OtimizadorCorteAco = ({ user }) => {
              const scale = barWidth / bar.originalLength;
              let currentX = margin;
 
-             // Desenha os cortes
+             // Desenha os cortes (visual)
              bar.cuts.forEach(cutItem => {
                  const cutLength = cutItem.length;
                  const cutWidth = cutLength * scale;
@@ -740,15 +740,13 @@ const OtimizadorCorteAco = ({ user }) => {
                  doc.setDrawColor(255, 255, 255);
                  doc.rect(currentX, yPos, cutWidth, barHeight, 'FD');
 
-                 // Texto dentro da barra (SÓ SE COUBER)
-                 // Regra: Só desenha texto se o corte tiver mais de 15mm visuais no papel
+                 // Texto dentro da barra (SÓ SE COUBER - > 15mm visuais)
                  if (cutWidth > 15) {
                      doc.setTextColor(255, 255, 255);
                      doc.setFontSize(8);
                      doc.setFont("helvetica", "bold");
                      doc.text(`${cutLength}`, currentX + (cutWidth / 2), yPos + 7, { align: 'center' });
                  }
-
                  currentX += cutWidth;
              });
 
@@ -758,7 +756,6 @@ const OtimizadorCorteAco = ({ user }) => {
                  doc.setFillColor(203, 213, 225); // Slate-300
                  doc.rect(currentX, yPos, remainingWidth, barHeight, 'FD');
                  
-                 // Texto na sobra se couber
                  if (remainingWidth > 20) {
                     doc.setTextColor(71, 85, 105);
                     doc.setFontSize(7);
@@ -766,48 +763,71 @@ const OtimizadorCorteAco = ({ user }) => {
                  }
              }
              
-             yPos += barHeight + 5; // Espaço após o desenho
+             yPos += barHeight + 5; 
 
-             // 3. TABELA DE CORTES (A Mágica acontece aqui)
-             // Prepara os dados para o autoTable
-             const tableBody = bar.cuts.map((cut, i) => [
-                 (i + 1), // Item #
-                 `${cut.length} cm`,
-                 cut.details?.elemento || '-',
-                 cut.details?.posicao || '-',
-                 cut.details?.os || '-',
-                 (cut.details?.origin || '').replace('[PROJETO]', '').substring(0, 15) // Origem resumida
+             // --- LÓGICA DE AGRUPAMENTO (NOVO) ---
+             const groupedCuts = [];
+             let activeGroup = null;
+
+             bar.cuts.forEach((cut) => {
+                // Cria uma "assinatura" única do corte para comparar
+                const signature = JSON.stringify({
+                    len: cut.length,
+                    elem: cut.details?.elemento,
+                    pos: cut.details?.posicao,
+                    os: cut.details?.os,
+                    orig: cut.details?.origin
+                });
+
+                if (activeGroup && activeGroup.signature === signature) {
+                    // Se for igual ao anterior, só incrementa
+                    activeGroup.qty++;
+                } else {
+                    // Se for diferente, salva o anterior e começa um novo
+                    if (activeGroup) groupedCuts.push(activeGroup);
+                    activeGroup = {
+                        signature: signature,
+                        qty: 1,
+                        data: cut // Guarda os dados para exibir
+                    };
+                }
+             });
+             // Não esquecer de empurrar o último grupo
+             if (activeGroup) groupedCuts.push(activeGroup);
+
+             // 3. TABELA AGRUPADA
+             const tableBody = groupedCuts.map((group) => [
+                 `${group.qty}x`, // Coluna Multiplicador
+                 `${group.data.length} cm`,
+                 group.data.details?.elemento || '-',
+                 group.data.details?.posicao || '-',
+                 group.data.details?.os || '-',
+                 (group.data.details?.origin || '').replace('[PROJETO]', '').substring(0, 15)
              ]);
 
-             // Gera a tabela
              doc.autoTable({
                  startY: yPos,
-                 head: [['#', 'Comp.', 'Elemento', 'Pos.', 'OS', 'Ref.']],
+                 head: [['Qtd', 'Comp.', 'Elemento', 'Pos.', 'OS', 'Ref.']], // Nova coluna Qtd
                  body: tableBody,
                  theme: 'grid',
                  margin: { left: margin, right: margin },
-                 styles: { fontSize: 8, cellPadding: 2 },
-                 headStyles: { fillColor: [71, 85, 105], textColor: 255 }, // Slate-700
+                 styles: { fontSize: 8, cellPadding: 2, valign: 'middle' },
+                 headStyles: { fillColor: [71, 85, 105], textColor: 255 },
                  columnStyles: {
-                     0: { cellWidth: 10, halign: 'center' }, // #
+                     0: { cellWidth: 15, fontStyle: 'bold', halign: 'center', textColor: [22, 163, 74] }, // Qtd (Verde e Negrito)
                      1: { cellWidth: 20, fontStyle: 'bold', halign: 'center' }, // Comp
-                     // As outras colunas se ajustam
                  },
-                 // Importante: Atualiza o yPos global após a tabela ser desenhada
                  didDrawPage: (data) => {
-                     // Se a tabela quebrar página, atualiza o yPos para o topo da próxima
                      yPos = data.cursor.y; 
                  }
              });
 
-             // Pega a posição final da tabela para continuar o loop
-             yPos = doc.lastAutoTable.finalY + 15; // +15 de respiro para a próxima barra
+             yPos = doc.lastAutoTable.finalY + 15;
         });
         
-        yPos += 10; // Espaço extra entre bitolas
+        yPos += 10;
     });
 
-    // Salva o arquivo
     const fileName = `Plano_Corte_Producao_${new Date().toISOString().slice(0,10)}.pdf`;
     doc.save(fileName);
   };
