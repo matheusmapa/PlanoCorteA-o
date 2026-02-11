@@ -691,7 +691,7 @@ const OtimizadorCorteAco = ({ user }) => {
     }, 100);
   };
 
-  const generatePDF = () => {
+ const generatePDF = () => {
     if (!window.jspdf || !results) return alert("Biblioteca PDF não carregada.");
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
@@ -701,10 +701,20 @@ const OtimizadorCorteAco = ({ user }) => {
     const margin = 14;
     let yPos = 20;
 
+    // --- FILTRAGEM (NOVO) ---
+    // Pega apenas os dados da aba que está ativa no momento
+    const dataToPrint = activeResultsBitola === 'todas' 
+        ? results 
+        : results.filter(g => Math.abs(parseFloat(g.bitola) - parseFloat(activeResultsBitola)) < 0.01);
+
+    if (dataToPrint.length === 0) return alert("Nenhum dado para gerar PDF nesta aba.");
+
     // Cabeçalho do Documento
     doc.setFontSize(18);
     doc.setTextColor(30, 41, 59); // Slate-800
-    doc.text("Plano de Corte - Produção", pageWidth / 2, yPos, { align: 'center' });
+    // Título dinâmico
+    const titulo = activeResultsBitola === 'todas' ? "Plano de Corte - Geral" : `Plano de Corte - ${parseFloat(activeResultsBitola).toFixed(1)}mm`;
+    doc.text(titulo, pageWidth / 2, yPos, { align: 'center' });
     yPos += 10;
     
     doc.setFontSize(10);
@@ -712,7 +722,7 @@ const OtimizadorCorteAco = ({ user }) => {
     doc.text(`Gerado em: ${new Date().toLocaleString()}`, pageWidth / 2, yPos, { align: 'center' });
     yPos += 15;
 
-    results.forEach((group) => {
+    dataToPrint.forEach((group) => {
         // Verifica espaço para o título da bitola
         if (yPos > 270) { doc.addPage(); yPos = 20; }
 
@@ -726,40 +736,36 @@ const OtimizadorCorteAco = ({ user }) => {
         yPos += 12;
 
         group.bars.forEach((bar, index) => {
-             // Se estiver muito no fim da página, pula antes de começar uma nova barra
              if (yPos > 250) { doc.addPage(); yPos = 20; }
 
-             // 1. INFO DA BARRA (Título)
+             // 1. INFO DA BARRA
              const typeText = bar.type === 'nova' ? "BARRA NOVA (12m)" : `PONTA DE ESTOQUE (${bar.originalLength}cm)`;
              doc.setFontSize(10);
              doc.setFont("helvetica", "bold");
              doc.setTextColor(0, 0, 0);
              doc.text(`${bar.count}x  ${typeText}`, margin, yPos);
              
-             // Info de Sobra (lado direito)
+             // Info de Sobra
              doc.setFont("helvetica", "normal");
-             const sobraColor = bar.remaining > 100 ? [22, 163, 74] : [220, 38, 38]; // Verde ou Vermelho
+             const sobraColor = bar.remaining > 100 ? [22, 163, 74] : [220, 38, 38]; 
              doc.setTextColor(...sobraColor);
              doc.text(`Sobra: ${bar.remaining.toFixed(1)}cm`, pageWidth - margin, yPos, { align: 'right' });
              yPos += 5;
 
-             // 2. DESENHO DA BARRA (VISUALIZAÇÃO)
+             // 2. DESENHO DA BARRA
              const barWidth = pageWidth - (margin * 2);
              const barHeight = 12;
              const scale = barWidth / bar.originalLength;
              let currentX = margin;
 
-             // Desenha os cortes (visual)
              bar.cuts.forEach(cutItem => {
                  const cutLength = cutItem.length;
                  const cutWidth = cutLength * scale;
                  
-                 // Retângulo Azul
                  doc.setFillColor(59, 130, 246); // Blue-500
                  doc.setDrawColor(255, 255, 255);
                  doc.rect(currentX, yPos, cutWidth, barHeight, 'FD');
 
-                 // Texto dentro da barra (SÓ SE COUBER - > 15mm visuais)
                  if (cutWidth > 15) {
                      doc.setTextColor(255, 255, 255);
                      doc.setFontSize(8);
@@ -769,7 +775,6 @@ const OtimizadorCorteAco = ({ user }) => {
                  currentX += cutWidth;
              });
 
-             // Desenha a sobra (Cinza)
              if (bar.remaining > 0) {
                  const remainingWidth = bar.remaining * scale;
                  doc.setFillColor(203, 213, 225); // Slate-300
@@ -784,12 +789,11 @@ const OtimizadorCorteAco = ({ user }) => {
              
              yPos += barHeight + 5; 
 
-             // --- LÓGICA DE AGRUPAMENTO (NOVO) ---
+             // 3. TABELA AGRUPADA
              const groupedCuts = [];
              let activeGroup = null;
 
              bar.cuts.forEach((cut) => {
-                // Cria uma "assinatura" única do corte para comparar
                 const signature = JSON.stringify({
                     len: cut.length,
                     elem: cut.details?.elemento,
@@ -799,24 +803,16 @@ const OtimizadorCorteAco = ({ user }) => {
                 });
 
                 if (activeGroup && activeGroup.signature === signature) {
-                    // Se for igual ao anterior, só incrementa
                     activeGroup.qty++;
                 } else {
-                    // Se for diferente, salva o anterior e começa um novo
                     if (activeGroup) groupedCuts.push(activeGroup);
-                    activeGroup = {
-                        signature: signature,
-                        qty: 1,
-                        data: cut // Guarda os dados para exibir
-                    };
+                    activeGroup = { signature: signature, qty: 1, data: cut };
                 }
              });
-             // Não esquecer de empurrar o último grupo
              if (activeGroup) groupedCuts.push(activeGroup);
 
-             // 3. TABELA AGRUPADA
              const tableBody = groupedCuts.map((group) => [
-                 `${group.qty}x`, // Coluna Multiplicador
+                 `${group.qty}x`,
                  `${group.data.length} cm`,
                  group.data.details?.elemento || '-',
                  group.data.details?.posicao || '-',
@@ -826,15 +822,15 @@ const OtimizadorCorteAco = ({ user }) => {
 
              doc.autoTable({
                  startY: yPos,
-                 head: [['Qtd', 'Comp.', 'Elemento', 'Pos.', 'OS', 'Ref.']], // Nova coluna Qtd
+                 head: [['Qtd', 'Comp.', 'Elemento', 'Pos.', 'OS', 'Ref.']],
                  body: tableBody,
                  theme: 'grid',
                  margin: { left: margin, right: margin },
                  styles: { fontSize: 8, cellPadding: 2, valign: 'middle' },
                  headStyles: { fillColor: [71, 85, 105], textColor: 255 },
                  columnStyles: {
-                     0: { cellWidth: 15, fontStyle: 'bold', halign: 'center', textColor: [22, 163, 74] }, // Qtd (Verde e Negrito)
-                     1: { cellWidth: 20, fontStyle: 'bold', halign: 'center' }, // Comp
+                     0: { cellWidth: 15, fontStyle: 'bold', halign: 'center', textColor: [22, 163, 74] },
+                     1: { cellWidth: 20, fontStyle: 'bold', halign: 'center' },
                  },
                  didDrawPage: (data) => {
                      yPos = data.cursor.y; 
@@ -847,10 +843,10 @@ const OtimizadorCorteAco = ({ user }) => {
         yPos += 10;
     });
 
-    const fileName = `Plano_Corte_Producao_${new Date().toISOString().slice(0,10)}.pdf`;
+    const fileName = `Plano_${activeResultsBitola === 'todas' ? 'Geral' : activeResultsBitola + 'mm'}_${new Date().toISOString().slice(0,10)}.pdf`;
     doc.save(fileName);
   };
-
+  
   // --- NOVA LÓGICA DE EXECUÇÃO ---
   const handleExecuteProject = () => {
       if (!results) return;
