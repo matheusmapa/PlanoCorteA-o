@@ -1579,7 +1579,6 @@ const OtimizadorCorteAco = ({ user }) => {
         </div>
     );
 })}
-                                        })}
                                         <div className="flex-1 bg-slate-300 pattern-diagonal-lines"></div>
                                     </div>
                                 </div>
