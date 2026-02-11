@@ -1532,28 +1532,33 @@ const OtimizadorCorteAco = ({ user }) => {
                                             const cutDetails = typeof cutItem === 'object' ? cutItem.details : {};
                                             
                                             return (
-                                                <div 
-                                                    key={cIdx} 
-                                                    style={{ width: `${(cutLength / bar.originalLength) * 100}%` }} 
-                                                    className="h-full bg-blue-500 border-r border-white flex flex-col items-center justify-center text-white text-xs overflow-hidden group hover:bg-blue-600 transition-colors relative" 
-                                                >
-                                                    <span className="font-bold">{cutLength}</span>
-                                                    
-                                                    {/* Mostra Elemento dentro da barra se houver espaço */}
-                                                    {cutDetails?.elemento && (
-                                                        <span className="text-[10px] leading-tight truncate px-1 max-w-full">{cutDetails.elemento}</span>
-                                                    )}
+    <div 
+        key={cIdx} 
+        style={{ width: `${(cutLength / bar.originalLength) * 100}%` }} 
+        className="h-full bg-blue-500 border-r border-white flex flex-col items-center justify-center text-white text-xs overflow-hidden group hover:bg-blue-600 transition-colors relative" 
+    >
+        {/* Texto visível na barra (Tamanho) */}
+        <span className="font-bold">{cutLength}</span>
+        
+        {/* Texto visível na barra (Elemento - se couber) */}
+        {cutDetails?.elemento && (
+            <span className="text-[9px] opacity-80 hidden sm:block truncate px-0.5">{cutDetails.elemento}</span>
+        )}
 
-                                                    {/* Tooltip Hover completo: Mostra TUDO */}
-                                                    <div className="absolute inset-0 opacity-0 group-hover:opacity-100 bg-black/95 flex flex-col items-center justify-center text-[9px] p-1 z-20 pointer-events-none transition-opacity shadow-lg">
-                                                        <span className="font-bold text-yellow-300 text-sm mb-0.5">{cutLength}cm</span>
-                                                        <span className="text-white font-bold">{cutDetails?.elemento || '-'}</span>
-                                                        <span className="text-slate-200">Pos: {cutDetails?.posicao || '-'}</span>
-                                                        <span className="text-slate-200">OS: {cutDetails?.os || '-'}</span>
-                                                        <span className="text-[8px] text-slate-400 mt-1 uppercase tracking-wide">{cutDetails?.origin ? `Loc: ${cutDetails.origin}` : 'Sem Loc.'}</span>
-                                                    </div>
-                                                </div>
-                                            );
+        {/* --- TOOLTIP (HOVER) CORRIGIDO --- */}
+        {/* Mudamos de hover:opacity para group-hover:opacity para garantir que apareça ao passar o mouse na barra mãe */}
+        <div className="absolute inset-0 opacity-0 group-hover:opacity-100 bg-black/95 flex flex-col items-center justify-center text-[9px] p-1 z-20 pointer-events-none transition-opacity shadow-lg">
+            <span className="font-bold text-yellow-300 text-sm mb-0.5">{cutLength}cm</span>
+            <span className="text-white font-bold">{cutDetails?.elemento || '-'}</span>
+            <span className="text-slate-200">Pos: {cutDetails?.posicao || '-'}</span>
+            <span className="text-slate-200">OS: {cutDetails?.os || '-'}</span>
+            {/* AQUI ESTÁ O LOCALIZADOR QUE FALTOU: */}
+            <span className="text-[8px] text-slate-400 mt-1 uppercase tracking-wide">
+                {cutDetails?.origin ? cutDetails.origin.replace('[PROJETO]', '').trim() : 'Sem Loc.'}
+            </span>
+        </div>
+    </div>
+);
                                         })}
                                         <div className="flex-1 bg-slate-300 pattern-diagonal-lines"></div>
                                     </div>
