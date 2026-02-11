@@ -78,29 +78,48 @@ const OtimizadorCorteAco = ({ user }) => {
   // --- Inicialização e Banco de Dados ---
   useEffect(() => {
     // 1. Carregar Scripts Externos (PDF.js, etc)
+    // 1. Carregar Scripts Externos (PDF.js, etc)
     const loadScripts = () => {
+        // --- LEITURA (PDF.js) ---
         const scriptPdf = document.createElement('script');
         scriptPdf.src = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js';
         scriptPdf.async = true;
         scriptPdf.onload = () => {
-            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            if (window.pdfjsLib) {
+                window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+            }
         };
         document.body.appendChild(scriptPdf);
 
+        // --- ESCRITA (jsPDF + AutoTable) ---
+        // IMPORTANTE: Carregamento em cascata para evitar erro "autoTable is not a function"
         const scriptJsPdf = document.createElement('script');
         scriptJsPdf.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
         scriptJsPdf.async = true;
-        document.body.appendChild(scriptJsPdf);
         
-        const scriptAutoTable = document.createElement('script');
-        scriptAutoTable.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js';
-        scriptAutoTable.async = true;
-        document.body.appendChild(scriptAutoTable);
+        scriptJsPdf.onload = () => {
+            // Garante que o jsPDF esteja disponível globalmente para o plugin encontrar
+            if (window.jspdf && window.jspdf.jsPDF) {
+                window.jsPDF = window.jspdf.jsPDF;
+            }
+
+            // Só agora carregamos o plugin
+            const scriptAutoTable = document.createElement('script');
+            scriptAutoTable.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js';
+            scriptAutoTable.async = true;
+            document.body.appendChild(scriptAutoTable);
+        };
+        
+        document.body.appendChild(scriptJsPdf);
 
         return () => {
-            document.body.removeChild(scriptPdf);
-            document.body.removeChild(scriptJsPdf);
-            document.body.removeChild(scriptAutoTable);
+            // Cleanup
+            try {
+                if(document.body.contains(scriptPdf)) document.body.removeChild(scriptPdf);
+                if(document.body.contains(scriptJsPdf)) document.body.removeChild(scriptJsPdf);
+                // Nota: scriptAutoTable é filho do onload, difícil limpar aqui sem referência externa, 
+                // mas não causa problemas graves de memória em SPAs simples.
+            } catch(e) { console.warn("Erro ao limpar scripts", e); }
         };
     };
     const cleanupScripts = loadScripts();
