@@ -1484,110 +1484,118 @@ const OtimizadorCorteAco = ({ user }) => {
         )}
 
         {/* --- TAB: RESULTS --- */}
-        {activeTab === 'results' && results && (
-            <div className="space-y-8 animate-fade-in pb-8">
-                <div className="flex justify-between items-center bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex-wrap gap-4">
-                    <div><h2 className="text-xl font-bold text-indigo-900">Plano Gerado</h2></div>
-                    <div className="flex gap-2 items-center flex-wrap">
-                        {/* 1. PDF */}
-                        <button onClick={generatePDF} className="bg-white text-indigo-700 border border-indigo-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-50">
-                            <Printer size={16} /> PDF
-                        </button>
-
-                        {/* 2. Salvar Plano */}
-                        <button onClick={handleSaveCutPlan} className="bg-indigo-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-700 transition-colors">
-                            <Save size={16} /> Salvar Plano
-                        </button>
-
-                        {/* 3. Limpar */}
-                        <button onClick={clearResults} className="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-red-100">
-                            <Eraser size={16} /> Limpar
-                        </button>
-
-                        {/* 4. Executar Projeto */}
-                        <button 
-                            onClick={handleExecuteProject} 
-                            className="bg-purple-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm font-bold border border-purple-800"
-                            title="Baixar estoque usado e salvar sobras"
-                        >
-                            <CheckSquare size={16} /> Executar Projeto
-                        </button>
-                    </div>
-                </div>
-                {renderBitolaTabs(activeResultsBitola, setActiveResultsBitola, results.map(r => parseFloat(r.bitola)).sort((a,b)=>a-b))}
-                {(activeResultsBitola === 'todas' ? results : results.filter(g => Math.abs(parseFloat(g.bitola) - parseFloat(activeResultsBitola)) < 0.01)).map((group, gIdx) => (
-                    <div key={gIdx} className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-hidden">
-                        <div className="bg-slate-100 px-6 py-3 border-b border-slate-200 flex justify-between"><h3 className="font-bold text-lg text-slate-800">{group.bitola}mm</h3><span className="text-sm text-slate-500">{group.bars.reduce((acc,b)=>acc+b.count,0)} barras</span></div>
-                        <div className="p-6 space-y-6">
-                            {group.bars.map((bar, bIdx) => (
-                                <div key={bIdx} className="flex flex-col gap-1 pb-4 border-b border-slate-100 last:border-0 last:pb-0">
-                                    <div className="flex justify-between text-sm text-slate-600 mb-1 items-center">
-                                        <div className="flex items-center gap-3"><span className="bg-slate-800 text-white font-bold px-3 py-1 rounded-full text-xs">{bar.count}x</span><span className="font-semibold uppercase tracking-wider text-xs">{bar.type === 'nova' ? <span className="text-blue-600 bg-blue-100 px-2 py-0.5 rounded">Barra Nova (12m)</span> : <span className="text-amber-600 bg-amber-100 px-2 py-0.5 rounded">Ponta ({bar.originalLength}cm)</span>}</span></div>
-                                        <span className="font-mono text-xs">Sobra: <span className={bar.remaining > 100 ? "text-green-600 font-bold" : "text-slate-600"}>{bar.remaining.toFixed(1)}cm</span></span>
-                                    </div>
-                                    <div className="h-14 w-full bg-slate-200 rounded overflow-hidden flex border border-slate-300 relative">
-                                        {bar.cuts.map((cutItem, cIdx) => {
-    // Garante que temos os dados, seja do formato novo ou antigo
-    const cutLength = typeof cutItem === 'object' ? cutItem.length : cutItem;
-    const cutDetails = typeof cutItem === 'object' ? cutItem.details : {};
-    
-    return (
-        <div 
-            key={cIdx} 
-            style={{ width: `${(cutLength / bar.originalLength) * 100}%` }} 
-            // REMOVIDO 'overflow-hidden' daqui para o tooltip poder "sair" da caixa
-            className="h-full bg-blue-500 border-r border-white relative group hover:bg-blue-600 transition-colors" 
-        >
-            {/* 1. O que aparece DENTRO da barra (Texto cortado se não couber) */}
-            <div className="absolute inset-0 flex flex-col items-center justify-center text-white text-xs overflow-hidden pointer-events-none px-1">
-                <span className="font-bold drop-shadow-sm">{cutLength}</span>
-                {cutDetails?.elemento && (
-                    <span className="text-[9px] opacity-90 hidden sm:block truncate w-full text-center">
-                        {cutDetails.elemento}
-                    </span>
-                )}
-            </div>
-
-            {/* 2. O TOOLTIP FLUTUANTE (Agora com w-max para não ser esmagado) */}
-            <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 bg-slate-900 text-white text-[10px] p-2 rounded shadow-2xl z-[100] pointer-events-none transition-all duration-200 w-max min-w-[120px] flex flex-col items-center border border-slate-700">
-                
-                {/* Triângulo (Setinha) apontando para baixo */}
-                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 border-r border-b border-slate-700 transform rotate-45"></div>
-                
-                {/* Cabeçalho do Tooltip */}
-                <div className="flex items-center gap-2 mb-1 border-b border-slate-700 pb-1 w-full justify-center">
-                    <span className="text-yellow-400 font-bold text-sm">{cutLength}cm</span>
-                    <span className="font-bold text-xs">{cutDetails?.elemento || 'S/ Elem.'}</span>
-                </div>
-                
-                {/* Corpo do Tooltip */}
-                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-slate-300 w-full px-1">
-                    <div className="text-right">Pos:</div>
-                    <div className="text-left font-bold text-white">{cutDetails?.posicao || '-'}</div>
-                    
-                    <div className="text-right">OS:</div>
-                    <div className="text-left font-bold text-white">{cutDetails?.os || '-'}</div>
-                </div>
-                
-                {/* Rodapé do Tooltip (Localizador) */}
-                <div className="mt-1 pt-1 border-t border-slate-700 w-full text-center">
-                    <span className="uppercase tracking-wider text-[9px] text-blue-300 font-semibold">
-                        {cutDetails?.origin ? cutDetails.origin.replace('[PROJETO]', '').trim() : 'SEM LOCALIZADOR'}
-                    </span>
-                </div>
+{activeTab === 'results' && results && (
+    <div className="space-y-8 animate-fade-in pb-8">
+        <div className="flex justify-between items-center bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex-wrap gap-4">
+            <div><h2 className="text-xl font-bold text-indigo-900">Plano Gerado</h2></div>
+            <div className="flex gap-2 items-center flex-wrap">
+                <button onClick={generatePDF} className="bg-white text-indigo-700 border border-indigo-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-50">
+                    <Printer size={16} /> PDF
+                </button>
+                <button onClick={handleSaveCutPlan} className="bg-indigo-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-700 transition-colors">
+                    <Save size={16} /> Salvar Plano
+                </button>
+                <button onClick={clearResults} className="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-red-100">
+                    <Eraser size={16} /> Limpar
+                </button>
+                <button 
+                    onClick={handleExecuteProject} 
+                    className="bg-purple-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm font-bold border border-purple-800"
+                    title="Baixar estoque usado e salvar sobras"
+                >
+                    <CheckSquare size={16} /> Executar Projeto
+                </button>
             </div>
         </div>
-    );
-})}
-                                        <div className="flex-1 bg-slate-300 pattern-diagonal-lines"></div>
-                                    </div>
+        
+        {renderBitolaTabs(activeResultsBitola, setActiveResultsBitola, results.map(r => parseFloat(r.bitola)).sort((a,b)=>a-b))}
+        
+        {(activeResultsBitola === 'todas' ? results : results.filter(g => Math.abs(parseFloat(g.bitola) - parseFloat(activeResultsBitola)) < 0.01)).map((group, gIdx) => (
+            <div key={gIdx} className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-visible"> {/* overflow-visible para o tooltip não ser cortado */}
+                <div className="bg-slate-100 px-6 py-3 border-b border-slate-200 flex justify-between">
+                    <h3 className="font-bold text-lg text-slate-800">{group.bitola}mm</h3>
+                    <span className="text-sm text-slate-500">{group.bars.reduce((acc,b)=>acc+b.count,0)} barras</span>
+                </div>
+                <div className="p-6 space-y-6">
+                    {group.bars.map((bar, bIdx) => (
+                        <div key={bIdx} className="flex flex-col gap-1 pb-4 border-b border-slate-100 last:border-0 last:pb-0">
+                            {/* Cabeçalho da Barra */}
+                            <div className="flex justify-between text-sm text-slate-600 mb-1 items-center">
+                                <div className="flex items-center gap-3">
+                                    <span className="bg-slate-800 text-white font-bold px-3 py-1 rounded-full text-xs">{bar.count}x</span>
+                                    <span className="font-semibold uppercase tracking-wider text-xs">
+                                        {bar.type === 'nova' 
+                                            ? <span className="text-blue-600 bg-blue-100 px-2 py-0.5 rounded">Barra Nova (12m)</span> 
+                                            : <span className="text-amber-600 bg-amber-100 px-2 py-0.5 rounded">Ponta ({bar.originalLength}cm)</span>
+                                        }
+                                    </span>
                                 </div>
-                            ))}
+                                <span className="font-mono text-xs">Sobra: <span className={bar.remaining > 100 ? "text-green-600 font-bold" : "text-slate-600"}>{bar.remaining.toFixed(1)}cm</span></span>
+                            </div>
+
+                            {/* O TRILHO DA BARRA (AQUI ESTAVA O PROBLEMA DO OVERFLOW) */}
+                            {/* Removi 'overflow-hidden' e adicionei 'rounded-lg' para manter bonitinho mas deixar o tooltip sair */}
+                            <div className="h-14 w-full bg-slate-200 rounded-lg flex border border-slate-300 relative z-0">
+                                {bar.cuts.map((cutItem, cIdx) => {
+                                    const cutLength = typeof cutItem === 'object' ? cutItem.length : cutItem;
+                                    const cutDetails = typeof cutItem === 'object' ? cutItem.details : {};
+                                    
+                                    return (
+                                        <div 
+                                            key={cIdx} 
+                                            style={{ width: `${(cutLength / bar.originalLength) * 100}%` }} 
+                                            className="h-full bg-blue-500 border-r border-white relative group hover:bg-blue-600 transition-colors first:rounded-l-lg" // Arredonda só o primeiro
+                                        >
+                                            {/* Texto DENTRO da barra (preso e cortado se necessário) */}
+                                            <div className="absolute inset-0 flex flex-col items-center justify-center text-white text-xs overflow-hidden pointer-events-none px-1">
+                                                <span className="font-bold drop-shadow-sm">{cutLength}</span>
+                                                {cutDetails?.elemento && (
+                                                    <span className="text-[9px] opacity-90 hidden sm:block truncate w-full text-center">
+                                                        {cutDetails.elemento}
+                                                    </span>
+                                                )}
+                                            </div>
+
+                                            {/* TOOLTIP FLUTUANTE (Livre, leve e solto) */}
+                                            {/* Z-index 50 para garantir que fique acima de tudo */}
+                                            <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 bg-slate-900 text-white text-[10px] p-2 rounded shadow-2xl z-50 pointer-events-none transition-all duration-200 w-max min-w-[140px] flex flex-col items-center border border-slate-700">
+                                                
+                                                {/* Setinha */}
+                                                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 border-r border-b border-slate-700 transform rotate-45"></div>
+                                                
+                                                {/* Conteúdo do Tooltip */}
+                                                <div className="flex items-center gap-2 mb-1 border-b border-slate-700 pb-1 w-full justify-center">
+                                                    <span className="text-yellow-400 font-bold text-sm">{cutLength}cm</span>
+                                                    <span className="font-bold text-xs">{cutDetails?.elemento || 'S/ Elem.'}</span>
+                                                </div>
+                                                
+                                                <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-slate-300 w-full px-1 text-left">
+                                                    <div className="text-right text-slate-500 text-[9px]">Pos:</div>
+                                                    <div className="font-bold text-white">{cutDetails?.posicao || '-'}</div>
+                                                    
+                                                    <div className="text-right text-slate-500 text-[9px]">OS:</div>
+                                                    <div className="font-bold text-white">{cutDetails?.os || '-'}</div>
+                                                </div>
+                                                
+                                                <div className="mt-1 pt-1 border-t border-slate-700 w-full text-center">
+                                                    <span className="uppercase tracking-wider text-[8px] text-blue-300 font-semibold">
+                                                        {cutDetails?.origin ? cutDetails.origin.replace('[PROJETO]', '').trim() : 'SEM LOCALIZADOR'}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                                {/* Espaço vazio (Sobra) */}
+                                <div className="flex-1 bg-slate-300 pattern-diagonal-lines last:rounded-r-lg"></div>
+                            </div>
                         </div>
-                    </div>
-                ))}
+                    ))}
+                </div>
             </div>
-        )}
+        ))}
+    </div>
+)}
         
         {/* --- ABA: COMPARADOR (EVALUATOR) --- */}
         {activeTab === 'evaluator' && (
