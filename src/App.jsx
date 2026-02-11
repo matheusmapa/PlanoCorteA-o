@@ -2,9 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { 
   Trash2, Plus, Download, Clipboard, Save, RefreshCw, FileText, Settings, 
   Upload, File, Info, XCircle, CheckSquare, Square, Printer, FolderDown, 
-  FolderUp, X, Eraser, LogOut, User, Menu, FolderHeart, Calendar, Edit3, 
-  Check, History, RotateCcw, BarChart3, Lightbulb, Layers, Database, Share2,
-  AlertTriangle, ArrowRight // Ícones adicionais
+  FolderHeart, Calendar, Edit3, Check, History, RotateCcw, BarChart3, 
+  Lightbulb, Database, Share2, LogOut, User, X, Eraser
 } from 'lucide-react';
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 import { collection, addDoc, deleteDoc, doc, updateDoc, onSnapshot, query, orderBy, serverTimestamp, setDoc, getDocs, writeBatch } from 'firebase/firestore';
@@ -579,7 +578,11 @@ const OtimizadorCorteAco = ({ user }) => {
           bitola: parseFloat(bitola),
           qty: parseInt(qty),
           length: parseFloat(length),
-          selected: true
+          selected: true,
+          // Campos novos manuais (opcionais)
+          elemento: '',
+          posicao: '',
+          os: ''
       };
       setItems([...items, newItem]);
       setShowManualInputModal(false);
@@ -663,18 +666,39 @@ const OtimizadorCorteAco = ({ user }) => {
         doc.setFillColor(240, 240, 240); doc.rect(10, yPos - 5, 190, 8, 'F');
         doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.text(`Bitola: ${parseFloat(group.bitola).toFixed(1)} mm`, 15, yPos); yPos += 10;
         doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+        
         group.bars.forEach(bar => {
              if (yPos > 260) { doc.addPage(); yPos = 20; }
              const typeText = bar.type === 'nova' ? "BARRA NOVA (1200cm)" : `PONTA ESTOQUE (${bar.originalLength}cm)`;
              doc.setFont("helvetica", "bold"); doc.text(`${bar.count}x  ${typeText}`, 15, yPos);
              doc.setFont("helvetica", "normal"); doc.text(`Sobra: ${bar.remaining.toFixed(0)}cm`, 150, yPos, { align: 'right' }); yPos += 3;
-             const scale = 180 / bar.originalLength; let currentX = 15;
-             bar.cuts.forEach(cut => {
-                 const cutWidth = cut * scale;
+             
+             const scale = 180 / bar.originalLength; 
+             let currentX = 15;
+             
+             bar.cuts.forEach(cutItem => {
+                 // Agora cutItem pode ser um OBJETO ou NÚMERO (retrocompatibilidade)
+                 const cutLength = typeof cutItem === 'object' ? cutItem.length : cutItem;
+                 const cutDetails = typeof cutItem === 'object' ? cutItem.details : {};
+                 
+                 const cutWidth = cutLength * scale;
                  doc.setFillColor(59, 130, 246); doc.rect(currentX, yPos, cutWidth, 8, 'F'); doc.rect(currentX, yPos, cutWidth, 8, 'S');
-                 if (cutWidth > 8) { doc.setTextColor(255, 255, 255); doc.setFontSize(8); doc.text(`${cut}`, currentX + (cutWidth / 2), yPos + 5.5, { align: 'center' }); }
+                 
+                 // Escreve o tamanho se couber
+                 if (cutWidth > 8) { 
+                     doc.setTextColor(255, 255, 255); 
+                     doc.setFontSize(8); 
+                     doc.text(`${cutLength}`, currentX + (cutWidth / 2), yPos + 4, { align: 'center' }); 
+                     
+                     // Tenta escrever o Elemento se couber e existir
+                     if (cutWidth > 12 && cutDetails && cutDetails.elemento) {
+                         doc.setFontSize(5);
+                         doc.text(cutDetails.elemento.substring(0, 8), currentX + (cutWidth / 2), yPos + 7, { align: 'center' });
+                     }
+                 }
                  currentX += cutWidth;
              });
+             
              if (bar.remaining > 0) {
                  const remainingWidth = bar.remaining * scale;
                  doc.setFillColor(220, 220, 220); doc.rect(currentX, yPos, remainingWidth, 8, 'F'); doc.rect(currentX, yPos, remainingWidth, 8, 'S');
@@ -684,45 +708,6 @@ const OtimizadorCorteAco = ({ user }) => {
         yPos += 5;
     });
     doc.save(`Plano_Corte_${new Date().toISOString().slice(0,10)}.pdf`);
-  };
-
-  const consolidateLeftovers = async () => {
-    if (!results) return;
-    
-    // Confirmação
-    if (!window.confirm("Deseja realmente salvar as sobras deste plano no estoque?")) return;
-
-    // BACKUP ANTES DE MODIFICAR
-    await createInventoryBackup("Antes de Consolidar Sobras");
-
-    const usedCounts = {};
-    results.forEach(group => {
-        group.bars.forEach(barGroup => {
-            if (barGroup.type === 'estoque') {
-                barGroup.ids.forEach(id => { usedCounts[id] = (usedCounts[id] || 0) + 1; });
-            }
-        });
-    });
-    
-    let updatedInventory = inventory.map(item => {
-        if (usedCounts[item.id]) { const newQty = item.qty - usedCounts[item.id]; return { ...item, qty: Math.max(0, newQty) }; }
-        return item;
-    }).filter(item => item.qty > 0);
-
-    results.forEach(group => {
-        group.bars.forEach(barGroup => {
-            if (barGroup.remaining > 50) { 
-                const bitola = parseFloat(group.bitola); const length = parseFloat(barGroup.remaining.toFixed(1)); const qtyToAdd = barGroup.count; 
-                const existingIndex = updatedInventory.findIndex(i => Math.abs(i.bitola - bitola) < 0.01 && Math.abs(i.length - length) < 0.1);
-                if (existingIndex !== -1) { updatedInventory[existingIndex].qty += qtyToAdd; } 
-                else { updatedInventory.push({ id: generateId(), bitola, length, qty: qtyToAdd, source: 'sobra_corte' }); }
-            }
-        });
-    });
-
-    updateInventory(updatedInventory);
-    alert(`Estoque atualizado e backup criado!`);
-    setActiveTab('inventory');
   };
 
   // --- NOVA LÓGICA DE EXECUÇÃO ---
@@ -770,7 +755,6 @@ const OtimizadorCorteAco = ({ user }) => {
             results.forEach(group => {
                 group.bars.forEach(barGroup => {
                     // Lógica: Salva se for maior que o limite de descarte. 
-                    // Se o usuário digitou 50, salvamos o que for > 50.
                     if (barGroup.remaining > discardThreshold) { 
                         const bitola = parseFloat(group.bitola); 
                         const length = parseFloat(barGroup.remaining.toFixed(1)); 
@@ -1339,7 +1323,17 @@ const OtimizadorCorteAco = ({ user }) => {
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm text-left">
                     <thead className="text-xs text-slate-500 uppercase bg-slate-100">
-                      <tr><th className="px-4 py-3">Bitola</th><th className="px-4 py-3">Qtd</th><th className="px-4 py-3">Comp. (cm)</th><th className="px-4 py-3">Origem</th><th className="px-4 py-3 text-right">Ação</th></tr>
+                      <tr>
+                          <th className="px-4 py-3">Bitola</th>
+                          <th className="px-4 py-3">Qtd</th>
+                          <th className="px-4 py-3">Comp. (cm)</th>
+                          {/* NOVAS COLUNAS */}
+                          <th className="px-4 py-3">Elem.</th>
+                          <th className="px-4 py-3">Pos.</th>
+                          <th className="px-4 py-3">OS</th>
+                          <th className="px-4 py-3">Origem</th>
+                          <th className="px-4 py-3 text-right">Ação</th>
+                      </tr>
                     </thead>
                     <tbody>
                       {filteredItems.map((item) => (
@@ -1351,6 +1345,12 @@ const OtimizadorCorteAco = ({ user }) => {
                           </td>
                           <td className="px-4 py-2"><input type="number" value={item.qty} onChange={(e) => updateItem(item.id, 'qty', parseInt(e.target.value))} className="w-16 p-1 border rounded font-bold text-blue-800 text-center" /></td>
                           <td className="px-4 py-2"><input type="number" value={item.length} onChange={(e) => updateItem(item.id, 'length', parseFloat(e.target.value))} className="w-20 p-1 border rounded text-center" /></td>
+                          
+                          {/* DADOS EXTRAS DO PDF */}
+                          <td className="px-4 py-2 text-xs text-slate-600">{item.elemento || '-'}</td>
+                          <td className="px-4 py-2 text-xs text-slate-600">{item.posicao || '-'}</td>
+                          <td className="px-4 py-2 text-xs text-slate-600">{item.os || '-'}</td>
+
                           <td className="px-4 py-2 text-xs text-slate-400 max-w-[100px] truncate" title={item.origin}>
                               {item.origin && item.origin.includes('[PROJETO]') 
                                 ? <span className="text-blue-500 font-semibold">{item.origin}</span>
@@ -1477,30 +1477,30 @@ const OtimizadorCorteAco = ({ user }) => {
                 <div className="flex justify-between items-center bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex-wrap gap-4">
                     <div><h2 className="text-xl font-bold text-indigo-900">Plano Gerado</h2></div>
                     <div className="flex gap-2 items-center flex-wrap">
-    {/* 1. PDF */}
-    <button onClick={generatePDF} className="bg-white text-indigo-700 border border-indigo-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-50">
-        <Printer size={16} /> PDF
-    </button>
+                        {/* 1. PDF */}
+                        <button onClick={generatePDF} className="bg-white text-indigo-700 border border-indigo-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-50">
+                            <Printer size={16} /> PDF
+                        </button>
 
-    {/* 2. Salvar Plano */}
-    <button onClick={handleSaveCutPlan} className="bg-indigo-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-700 transition-colors">
-        <Save size={16} /> Salvar Plano
-    </button>
+                        {/* 2. Salvar Plano */}
+                        <button onClick={handleSaveCutPlan} className="bg-indigo-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-700 transition-colors">
+                            <Save size={16} /> Salvar Plano
+                        </button>
 
-    {/* 3. Limpar */}
-    <button onClick={clearResults} className="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-red-100">
-        <Eraser size={16} /> Limpar
-    </button>
+                        {/* 3. Limpar */}
+                        <button onClick={clearResults} className="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-red-100">
+                            <Eraser size={16} /> Limpar
+                        </button>
 
-    {/* 4. Executar Projeto */}
-    <button 
-        onClick={handleExecuteProject} 
-        className="bg-purple-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm font-bold border border-purple-800"
-        title="Baixar estoque usado e salvar sobras"
-    >
-        <CheckSquare size={16} /> Executar Projeto
-    </button>
-</div>
+                        {/* 4. Executar Projeto */}
+                        <button 
+                            onClick={handleExecuteProject} 
+                            className="bg-purple-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm font-bold border border-purple-800"
+                            title="Baixar estoque usado e salvar sobras"
+                        >
+                            <CheckSquare size={16} /> Executar Projeto
+                        </button>
+                    </div>
                 </div>
                 {renderBitolaTabs(activeResultsBitola, setActiveResultsBitola, results.map(r => parseFloat(r.bitola)).sort((a,b)=>a-b))}
                 {(activeResultsBitola === 'todas' ? results : results.filter(g => Math.abs(parseFloat(g.bitola) - parseFloat(activeResultsBitola)) < 0.01)).map((group, gIdx) => (
@@ -1514,11 +1514,34 @@ const OtimizadorCorteAco = ({ user }) => {
                                         <span className="font-mono text-xs">Sobra: <span className={bar.remaining > 100 ? "text-green-600 font-bold" : "text-slate-600"}>{bar.remaining.toFixed(1)}cm</span></span>
                                     </div>
                                     <div className="h-14 w-full bg-slate-200 rounded overflow-hidden flex border border-slate-300 relative">
-                                        {bar.cuts.map((cut, cIdx) => (
-                                            <div key={cIdx} style={{ width: `${(cut / bar.originalLength) * 100}%` }} className="h-full bg-blue-500 border-r border-white flex flex-col items-center justify-center text-white text-xs overflow-hidden group hover:bg-blue-600 transition-colors" title={`Peça: ${cut}cm`}>
-                                                <span className="font-bold">{cut}</span>
-                                            </div>
-                                        ))}
+                                        {bar.cuts.map((cutItem, cIdx) => {
+                                            // Suporte duplo: se for objeto (novo) ou número (velho)
+                                            const cutLength = typeof cutItem === 'object' ? cutItem.length : cutItem;
+                                            const cutDetails = typeof cutItem === 'object' ? cutItem.details : {};
+                                            
+                                            return (
+                                                <div 
+                                                    key={cIdx} 
+                                                    style={{ width: `${(cutLength / bar.originalLength) * 100}%` }} 
+                                                    className="h-full bg-blue-500 border-r border-white flex flex-col items-center justify-center text-white text-xs overflow-hidden group hover:bg-blue-600 transition-colors relative" 
+                                                >
+                                                    <span className="font-bold">{cutLength}</span>
+                                                    
+                                                    {/* Tooltip em texto pequeno se couber */}
+                                                    {cutDetails?.elemento && (
+                                                        <span className="text-[9px] opacity-80 hidden sm:block truncate px-0.5">{cutDetails.elemento}</span>
+                                                    )}
+
+                                                    {/* Tooltip Hover completo */}
+                                                    <div className="absolute inset-0 opacity-0 hover:opacity-100 bg-black/90 flex flex-col items-center justify-center text-[9px] p-1 z-10 pointer-events-none transition-opacity">
+                                                        <span className="font-bold text-yellow-300">{cutLength}cm</span>
+                                                        <span>{cutDetails?.elemento || '-'}</span>
+                                                        <span>Pos: {cutDetails?.posicao || '-'}</span>
+                                                        <span>OS: {cutDetails?.os || '-'}</span>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
                                         <div className="flex-1 bg-slate-300 pattern-diagonal-lines"></div>
                                     </div>
                                 </div>
