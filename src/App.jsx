@@ -425,21 +425,37 @@ const OtimizadorCorteAco = ({ user }) => {
   };
 
   // --- FUNÇÕES: PROJETOS DE DEMANDA (INPUT) ---
+  // Em src/App.jsx
+
   const handleSaveProject = async () => {
       if (items.length === 0) return alert("A lista de corte está vazia. Nada para salvar.");
       const projectName = window.prompt("Nome do Projeto (ex: Obra Residencial Silva):");
       if (!projectName) return;
+      
       try {
+          // --- CORREÇÃO 3: Higienizar dados para evitar 'undefined' no Firebase ---
+          const sanitizedItems = items.map(item => ({
+              ...item,
+              elemento: item.elemento || '', // Garante string vazia se for undefined
+              posicao: item.posicao || '',
+              os: item.os || '',
+              origin: item.origin || '',
+              // Garante segurança nos números também
+              bitola: item.bitola || 0,
+              qty: item.qty || 0,
+              length: item.length || 0
+          }));
+
           await addDoc(collection(db, 'users', user.uid, 'projects'), {
               name: projectName,
-              items: items,
+              items: sanitizedItems, // Envia a lista tratada
               createdAt: serverTimestamp()
           });
           alert("Projeto salvo com sucesso! Confira na aba lateral.");
           setIsSidebarOpen(true);
       } catch (error) {
           console.error("Erro ao salvar:", error);
-          alert("Erro ao salvar projeto.");
+          alert("Erro ao salvar projeto. Verifique o console.");
       }
   };
 
@@ -532,20 +548,28 @@ const OtimizadorCorteAco = ({ user }) => {
         setUploadedFiles([...newUploadedFiles]);
 
         try {
-            let text = "";
-            if (file.type === "application/pdf") {
-                text = await extractTextFromPDF(file);
-            } else {
-                text = await file.text();
-            }
+        let text = "";
+        if (file.type === "application/pdf") {
+            text = await extractTextFromPDF(file);
+        } else {
+            text = await file.text();
+        }
 
-            const itemsFromThisFile = parseTextToItems(text, file.name);
-            allExtractedItems = [...allExtractedItems, ...itemsFromThisFile];
-            
-            const fileIndex = newUploadedFiles.findIndex(f => f.name === file.name && f.type === 'file');
-            if (fileIndex !== -1) newUploadedFiles[fileIndex].status = 'ok';
+        const itemsFromThisFile = parseTextToItems(text, file.name);
+        
+        // --- CORREÇÃO 1: Detectar qual origem foi usada nesses itens ---
+        const detectedOrigin = itemsFromThisFile.length > 0 ? itemsFromThisFile[0].origin : file.name;
 
-        } catch (error) {
+        allExtractedItems = [...allExtractedItems, ...itemsFromThisFile];
+        
+        const fileIndex = newUploadedFiles.findIndex(f => f.name === file.name && f.type === 'file');
+        if (fileIndex !== -1) {
+             newUploadedFiles[fileIndex].status = 'ok';
+             // Guardamos essa info no arquivo para usar na remoção depois
+             newUploadedFiles[fileIndex].associatedOrigin = detectedOrigin; 
+        }
+
+    } catch (error) { {
             console.error("Erro:", error);
             const fileIndex = newUploadedFiles.findIndex(f => f.name === file.name && f.type === 'file');
             if (fileIndex !== -1) newUploadedFiles[fileIndex].status = 'erro';
@@ -560,7 +584,17 @@ const OtimizadorCorteAco = ({ user }) => {
 
   const removeFileOrProject = (fileData) => {
       setUploadedFiles(prev => prev.filter(f => f.id !== fileData.id));
-      const originToRemove = fileData.type === 'project' ? fileData.originName : fileData.name;
+      
+      // --- CORREÇÃO 2: Usar a origem correta para remover os itens ---
+      let originToRemove;
+      
+      if (fileData.type === 'project') {
+          originToRemove = fileData.originName;
+      } else {
+          // Se for arquivo, tenta pegar a origem detectada (se existir), senão usa o nome do arquivo
+          originToRemove = fileData.associatedOrigin || fileData.name;
+      }
+      
       setItems(prev => prev.filter(i => i.origin !== originToRemove));
   };
 
