@@ -1527,38 +1527,58 @@ const OtimizadorCorteAco = ({ user }) => {
                                     </div>
                                     <div className="h-14 w-full bg-slate-200 rounded overflow-hidden flex border border-slate-300 relative">
                                         {bar.cuts.map((cutItem, cIdx) => {
-                                            // Suporte duplo: se for objeto (novo) ou número (velho)
-                                            const cutLength = typeof cutItem === 'object' ? cutItem.length : cutItem;
-                                            const cutDetails = typeof cutItem === 'object' ? cutItem.details : {};
-                                            
-                                            return (
-    <div 
-        key={cIdx} 
-        style={{ width: `${(cutLength / bar.originalLength) * 100}%` }} 
-        className="h-full bg-blue-500 border-r border-white flex flex-col items-center justify-center text-white text-xs overflow-hidden group hover:bg-blue-600 transition-colors relative" 
-    >
-        {/* Texto visível na barra (Tamanho) */}
-        <span className="font-bold">{cutLength}</span>
-        
-        {/* Texto visível na barra (Elemento - se couber) */}
-        {cutDetails?.elemento && (
-            <span className="text-[9px] opacity-80 hidden sm:block truncate px-0.5">{cutDetails.elemento}</span>
-        )}
+    // Garante que temos os dados, seja do formato novo ou antigo
+    const cutLength = typeof cutItem === 'object' ? cutItem.length : cutItem;
+    const cutDetails = typeof cutItem === 'object' ? cutItem.details : {};
+    
+    return (
+        <div 
+            key={cIdx} 
+            style={{ width: `${(cutLength / bar.originalLength) * 100}%` }} 
+            // REMOVIDO 'overflow-hidden' daqui para o tooltip poder "sair" da caixa
+            className="h-full bg-blue-500 border-r border-white relative group hover:bg-blue-600 transition-colors" 
+        >
+            {/* 1. O que aparece DENTRO da barra (Texto cortado se não couber) */}
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-white text-xs overflow-hidden pointer-events-none px-1">
+                <span className="font-bold drop-shadow-sm">{cutLength}</span>
+                {cutDetails?.elemento && (
+                    <span className="text-[9px] opacity-90 hidden sm:block truncate w-full text-center">
+                        {cutDetails.elemento}
+                    </span>
+                )}
+            </div>
 
-        {/* --- TOOLTIP (HOVER) CORRIGIDO --- */}
-        {/* Mudamos de hover:opacity para group-hover:opacity para garantir que apareça ao passar o mouse na barra mãe */}
-        <div className="absolute inset-0 opacity-0 group-hover:opacity-100 bg-black/95 flex flex-col items-center justify-center text-[9px] p-1 z-20 pointer-events-none transition-opacity shadow-lg">
-            <span className="font-bold text-yellow-300 text-sm mb-0.5">{cutLength}cm</span>
-            <span className="text-white font-bold">{cutDetails?.elemento || '-'}</span>
-            <span className="text-slate-200">Pos: {cutDetails?.posicao || '-'}</span>
-            <span className="text-slate-200">OS: {cutDetails?.os || '-'}</span>
-            {/* AQUI ESTÁ O LOCALIZADOR QUE FALTOU: */}
-            <span className="text-[8px] text-slate-400 mt-1 uppercase tracking-wide">
-                {cutDetails?.origin ? cutDetails.origin.replace('[PROJETO]', '').trim() : 'Sem Loc.'}
-            </span>
+            {/* 2. O TOOLTIP FLUTUANTE (Agora com w-max para não ser esmagado) */}
+            <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 bg-slate-900 text-white text-[10px] p-2 rounded shadow-2xl z-[100] pointer-events-none transition-all duration-200 w-max min-w-[120px] flex flex-col items-center border border-slate-700">
+                
+                {/* Triângulo (Setinha) apontando para baixo */}
+                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 border-r border-b border-slate-700 transform rotate-45"></div>
+                
+                {/* Cabeçalho do Tooltip */}
+                <div className="flex items-center gap-2 mb-1 border-b border-slate-700 pb-1 w-full justify-center">
+                    <span className="text-yellow-400 font-bold text-sm">{cutLength}cm</span>
+                    <span className="font-bold text-xs">{cutDetails?.elemento || 'S/ Elem.'}</span>
+                </div>
+                
+                {/* Corpo do Tooltip */}
+                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-slate-300 w-full px-1">
+                    <div className="text-right">Pos:</div>
+                    <div className="text-left font-bold text-white">{cutDetails?.posicao || '-'}</div>
+                    
+                    <div className="text-right">OS:</div>
+                    <div className="text-left font-bold text-white">{cutDetails?.os || '-'}</div>
+                </div>
+                
+                {/* Rodapé do Tooltip (Localizador) */}
+                <div className="mt-1 pt-1 border-t border-slate-700 w-full text-center">
+                    <span className="uppercase tracking-wider text-[9px] text-blue-300 font-semibold">
+                        {cutDetails?.origin ? cutDetails.origin.replace('[PROJETO]', '').trim() : 'SEM LOCALIZADOR'}
+                    </span>
+                </div>
+            </div>
         </div>
-    </div>
-);
+    );
+})}
                                         })}
                                         <div className="flex-1 bg-slate-300 pattern-diagonal-lines"></div>
                                     </div>
