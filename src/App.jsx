@@ -28,7 +28,7 @@ const OtimizadorCorteAco = ({ user }) => {
   // Opções
   const [useLeftovers, setUseLeftovers] = useState(true);
   
-  // Arquivos: uploadedFiles agora pode conter arquivos REAIS ou PROJETOS CARREGADOS
+  // Arquivos
   const [uploadedFiles, setUploadedFiles] = useState([]);
 
   // --- Estados do Banco de Dados ---
@@ -38,19 +38,19 @@ const OtimizadorCorteAco = ({ user }) => {
   // --- Estados de Modais e UI ---
   const [showBackupModal, setShowBackupModal] = useState(false);
   const [showStrategyModal, setShowStrategyModal] = useState(false);
-  const [showDataModal, setShowDataModal] = useState(false); // Modal de Dados (Export/Import)
+  const [showDataModal, setShowDataModal] = useState(false); // Modal de Dados
   const [backupsList, setBackupsList] = useState([]);
 
   // --- NOVO: Estado para o Modal de Execução ---
   const [showExecuteModal, setShowExecuteModal] = useState(false);
   const [executeOptions, setExecuteOptions] = useState({
-      deductStock: true,      // Dar baixa em pontas usadas (Padrão: Ligado)
-      saveLeftovers: true,    // Guardar pontas no estoque (Padrão: Ligado)
-      discardLimit: ''        // Descartar pontas de até X cm (Vazio = guarda tudo)
+      deductStock: true,      // Dar baixa em pontas usadas
+      saveLeftovers: true,    // Guardar pontas no estoque
+      discardLimit: ''        // Descartar pontas de até X cm
   });
 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-  const [editingProject, setEditingProject] = useState(null); // Projeto sendo editado no modal
+  const [editingProject, setEditingProject] = useState(null); 
   
   // --- Estados de Interface (Filtros e Inputs) ---
   const [activeInventoryBitola, setActiveInventoryBitola] = useState('todas');
@@ -73,7 +73,7 @@ const OtimizadorCorteAco = ({ user }) => {
 
   const BARRA_PADRAO = 1200;
   const PERDA_CORTE = 0;
-  const MAX_BACKUPS = 5; // Limite de backups no histórico
+  const MAX_BACKUPS = 5;
 
   // --- Inicialização e Banco de Dados ---
   useEffect(() => {
@@ -105,50 +105,56 @@ const OtimizadorCorteAco = ({ user }) => {
     };
     const cleanupScripts = loadScripts();
 
-    // 2. Tenta carregar LocalStorage primeiro
+    // 2. Tenta carregar LocalStorage primeiro (GARANTIA DE DADOS OFFLINE)
     const savedInventory = localStorage.getItem('estoquePontas');
     if (savedInventory) {
       try {
         let parsedInv = JSON.parse(savedInventory);
         if (Array.isArray(parsedInv)) {
-            parsedInv = parsedInv.map(i => i.qty ? i : { ...i, qty: 1 });
+            // Garante que todo item tenha qty e bitola válida
+            parsedInv = parsedInv.map(i => ({
+                ...i,
+                qty: i.qty || 1,
+                bitola: i.bitola || 0 // Proteção contra bitola undefined
+            }));
             setInventory(parsedInv);
         }
-      } catch (e) { console.error(e); }
+      } catch (e) { console.error("Erro ao ler LocalStorage:", e); }
     }
 
     // 3. Ouvintes do Firestore
     if (user) {
-        // A) Projetos de Demanda (Input)
+        // A) Projetos
         const qProjects = query(collection(db, 'users', user.uid, 'projects'), orderBy('createdAt', 'desc'));
         const unsubscribeProjects = onSnapshot(qProjects, (snapshot) => {
-            const projectsData = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            }));
+            const projectsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             setProjects(projectsData);
         });
 
-        // B) Planos de Corte Salvos (Output)
+        // B) Planos Salvos
         const qPlans = query(collection(db, 'users', user.uid, 'cutPlans'), orderBy('createdAt', 'desc'));
         const unsubscribePlans = onSnapshot(qPlans, (snapshot) => {
-            const plansData = snapshot.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data()
-            }));
+            const plansData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
             setSavedPlans(plansData);
         });
 
-        // C) ESTOQUE DE PONTAS
+        // C) ESTOQUE DE PONTAS (Correção de carregamento)
         const inventoryDocRef = doc(db, 'users', user.uid, 'appData', 'inventory');
         const unsubscribeInventory = onSnapshot(inventoryDocRef, (docSnap) => {
             if (docSnap.exists()) {
                 const data = docSnap.data();
                 if (data.items && Array.isArray(data.items)) {
-                    setInventory(data.items);
-                    localStorage.setItem('estoquePontas', JSON.stringify(data.items));
+                    // Sanitização ao carregar do banco
+                    const cleanItems = data.items.map(i => ({
+                        ...i,
+                        qty: i.qty || 1,
+                        bitola: parseFloat(i.bitola) || 0
+                    }));
+                    setInventory(cleanItems);
+                    localStorage.setItem('estoquePontas', JSON.stringify(cleanItems));
                 }
             }
+            // Se o documento NÃO existir no banco, mantemos o que carregou do LocalStorage
         });
 
         return () => {
@@ -204,7 +210,6 @@ const OtimizadorCorteAco = ({ user }) => {
           try {
               const data = JSON.parse(e.target.result);
               
-              // 1. Importar Projetos
               if (data.projects && Array.isArray(data.projects) && data.projects.length > 0) {
                   let projCount = 0;
                   const projectsColl = collection(db, 'users', user.uid, 'projects');
@@ -221,7 +226,6 @@ const OtimizadorCorteAco = ({ user }) => {
                   console.log(`${projCount} projetos importados.`);
               }
 
-              // 2. Importar Planos
               if (data.savedPlans && Array.isArray(data.savedPlans) && data.savedPlans.length > 0) {
                   let planCount = 0;
                   const plansColl = collection(db, 'users', user.uid, 'cutPlans');
@@ -238,7 +242,6 @@ const OtimizadorCorteAco = ({ user }) => {
                   console.log(`${planCount} planos importados.`);
               }
 
-              // 3. Importar Estoque
               if (data.inventory && Array.isArray(data.inventory) && data.inventory.length > 0) {
                   const action = window.prompt(
                       `O arquivo contém ${data.inventory.length} itens de estoque.\n\nDigite 'SUBSTITUIR' para apagar seu estoque atual e usar o do arquivo.\nDigite 'MESCLAR' para adicionar os itens ao seu estoque atual.\nCancelar para ignorar estoque.`, 
@@ -324,26 +327,20 @@ const OtimizadorCorteAco = ({ user }) => {
     if (!user) return;
     try {
         const backupsRef = collection(db, 'users', user.uid, 'inventoryBackups');
-        
         await addDoc(backupsRef, {
             items: inventory,
             reason: reason,
             createdAt: serverTimestamp()
         });
-
+        // Limpeza de backups antigos
         const q = query(backupsRef, orderBy('createdAt', 'desc'));
         const snapshot = await getDocs(q);
-        
         if (snapshot.docs.length > MAX_BACKUPS) {
             const batch = writeBatch(db);
-            snapshot.docs.slice(MAX_BACKUPS).forEach(doc => {
-                batch.delete(doc.ref);
-            });
+            snapshot.docs.slice(MAX_BACKUPS).forEach(doc => batch.delete(doc.ref));
             await batch.commit();
         }
-    } catch (error) {
-        console.error("Erro ao criar backup:", error);
-    }
+    } catch (error) { console.error("Erro ao criar backup:", error); }
   };
 
   const fetchBackups = async () => {
@@ -355,11 +352,8 @@ const OtimizadorCorteAco = ({ user }) => {
           const backups = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
           setBackupsList(backups);
           setShowBackupModal(true);
-      } catch (error) {
-          alert("Erro ao buscar histórico.");
-      } finally {
-          setIsProcessing(false);
-      }
+      } catch (error) { alert("Erro ao buscar histórico."); } 
+      finally { setIsProcessing(false); }
   };
 
   const restoreBackup = async (backupItem) => {
@@ -379,9 +373,7 @@ const OtimizadorCorteAco = ({ user }) => {
                 items: newInv,
                 updatedAt: serverTimestamp()
             });
-        } catch (error) {
-            console.error("Erro ao salvar estoque no banco:", error);
-        }
+        } catch (error) { console.error("Erro ao salvar estoque no banco:", error); }
     }
   };
 
@@ -391,18 +383,13 @@ const OtimizadorCorteAco = ({ user }) => {
       const planName = window.prompt("Nome para este Plano de Corte (ex: Lote A - 03/02):");
       if (!planName) return;
       try {
-          // --- FIX 2: SANITIZAÇÃO DO PLANO DE CORTE ---
-          // O Firestore não aceita Arrays de Arrays (que é o caso do 'allDetails' gerado pelo otimizador)
-          // Também removemos undefined para evitar crashes.
+          // Higienização para evitar erros no Firebase
           const sanitizedResults = results.map(group => ({
               ...group,
               bars: group.bars.map(bar => {
-                  // Separamos 'allDetails' (problemático) do resto da barra
                   const { allDetails, ...cleanBar } = bar; 
-                  
                   return {
                       ...cleanBar,
-                      // Garantir que não existam undefineds dentro de cuts
                       cuts: cleanBar.cuts.map(cut => ({
                           length: cut.length || 0,
                           details: {
@@ -412,7 +399,6 @@ const OtimizadorCorteAco = ({ user }) => {
                               origin: cut.details?.origin || ''
                           }
                       })),
-                      // Se houver outros campos como ids, garantir array
                       ids: cleanBar.ids || []
                   };
               })
@@ -427,7 +413,7 @@ const OtimizadorCorteAco = ({ user }) => {
           setIsSidebarOpen(true);
       } catch (error) {
           console.error("Erro ao salvar plano:", error);
-          alert("Erro ao salvar o plano. Verifique o console.");
+          alert("Erro ao salvar o plano.");
       }
   };
 
@@ -445,19 +431,16 @@ const OtimizadorCorteAco = ({ user }) => {
       if(window.confirm("Excluir este plano de corte do histórico permanentemente?")) {
           try {
               await deleteDoc(doc(db, 'users', user.uid, 'cutPlans', planId));
-          } catch (error) {
-              alert("Erro ao excluir.");
-          }
+          } catch (error) { alert("Erro ao excluir."); }
       }
   };
 
   // --- FUNÇÕES: PROJETOS DE DEMANDA (INPUT) ---
   const handleSaveProject = async () => {
-      if (items.length === 0) return alert("A lista de corte está vazia. Nada para salvar.");
+      if (items.length === 0) return alert("A lista de corte está vazia.");
       const projectName = window.prompt("Nome do Projeto (ex: Obra Residencial Silva):");
       if (!projectName) return;
       try {
-          // --- FIX 3: HIGIENIZAÇÃO DE PROJETOS ---
           const sanitizedItems = items.map(item => ({
               ...item,
               elemento: item.elemento || '', 
@@ -474,7 +457,7 @@ const OtimizadorCorteAco = ({ user }) => {
               items: sanitizedItems,
               createdAt: serverTimestamp()
           });
-          alert("Projeto salvo com sucesso! Confira na aba lateral.");
+          alert("Projeto salvo com sucesso!");
           setIsSidebarOpen(true);
       } catch (error) {
           console.error("Erro ao salvar:", error);
@@ -485,14 +468,9 @@ const OtimizadorCorteAco = ({ user }) => {
   const handleUpdateProjectName = async (projectId, newName) => {
       if (!newName.trim()) return;
       try {
-          await updateDoc(doc(db, 'users', user.uid, 'projects', projectId), {
-              name: newName
-          });
+          await updateDoc(doc(db, 'users', user.uid, 'projects', projectId), { name: newName });
           setEditingProject(prev => ({...prev, name: newName}));
-      } catch (error) {
-          console.error("Erro ao atualizar:", error);
-          alert("Erro ao renomear projeto.");
-      }
+      } catch (error) { alert("Erro ao renomear projeto."); }
   };
 
   const loadProjectAsModule = (project) => {
@@ -524,22 +502,17 @@ const OtimizadorCorteAco = ({ user }) => {
   };
 
   const handleDeleteProject = async (projectId) => {
-      if(window.confirm("Tem certeza que deseja excluir este projeto PERMANENTEMENTE do banco de dados?")) {
+      if(window.confirm("Excluir este projeto PERMANENTEMENTE?")) {
           try {
               await deleteDoc(doc(db, 'users', user.uid, 'projects', projectId));
               setEditingProject(null);
-          } catch (error) {
-              alert("Erro ao excluir.");
-          }
+          } catch (error) { alert("Erro ao excluir."); }
       }
   };
 
   // --- FUNÇÕES GERAIS E DE UI ---
-
   const handleLogout = () => {
-      if(window.confirm("Deseja realmente sair?")) {
-          signOut(auth);
-      }
+      if(window.confirm("Deseja realmente sair?")) signOut(auth);
   };
 
   const toggleBitola = (bitola) => {
@@ -579,8 +552,6 @@ const OtimizadorCorteAco = ({ user }) => {
             }
 
             const itemsFromThisFile = parseTextToItems(text, file.name);
-            
-            // --- FIX 1: Detectar qual origem foi usada para vincular ao arquivo ---
             const detectedOrigin = itemsFromThisFile.length > 0 ? itemsFromThisFile[0].origin : file.name;
 
             allExtractedItems = [...allExtractedItems, ...itemsFromThisFile];
@@ -588,7 +559,7 @@ const OtimizadorCorteAco = ({ user }) => {
             const fileIndex = newUploadedFiles.findIndex(f => f.name === file.name && f.type === 'file');
             if (fileIndex !== -1) {
                 newUploadedFiles[fileIndex].status = 'ok';
-                newUploadedFiles[fileIndex].associatedOrigin = detectedOrigin; // Salva o vinculo
+                newUploadedFiles[fileIndex].associatedOrigin = detectedOrigin;
             }
 
         } catch (error) {
@@ -606,16 +577,12 @@ const OtimizadorCorteAco = ({ user }) => {
 
   const removeFileOrProject = (fileData) => {
       setUploadedFiles(prev => prev.filter(f => f.id !== fileData.id));
-      
-      // --- FIX 1 (Continuação): Remover usando a origem correta ---
       let originToRemove;
       if (fileData.type === 'project') {
           originToRemove = fileData.originName;
       } else {
-          // Se for arquivo, usa a origem detectada pelo PDFProcessor
           originToRemove = fileData.associatedOrigin || fileData.name;
       }
-      
       setItems(prev => prev.filter(i => i.origin !== originToRemove));
   };
 
@@ -634,10 +601,7 @@ const OtimizadorCorteAco = ({ user }) => {
           qty: parseInt(qty),
           length: parseFloat(length),
           selected: true,
-          // Campos novos manuais (opcionais)
-          elemento: '',
-          posicao: '',
-          os: ''
+          elemento: '', posicao: '', os: ''
       };
       setItems([...items, newItem]);
       setShowManualInputModal(false);
@@ -730,13 +694,11 @@ const OtimizadorCorteAco = ({ user }) => {
              
              const scale = 180 / bar.originalLength; 
              let currentX = 15;
-             
              const barHeight = 16;
 
              bar.cuts.forEach(cutItem => {
                  const cutLength = cutItem.length;
                  const cutDetails = cutItem.details || {};
-                 
                  const cutWidth = cutLength * scale;
                  
                  doc.setFillColor(59, 130, 246); 
@@ -745,7 +707,6 @@ const OtimizadorCorteAco = ({ user }) => {
                  
                  if (cutWidth > 6) { 
                      doc.setTextColor(255, 255, 255); 
-                     
                      doc.setFontSize(8); 
                      doc.text(`${cutLength}`, currentX + (cutWidth / 2), yPos + 4, { align: 'center' }); 
                      
@@ -786,7 +747,6 @@ const OtimizadorCorteAco = ({ user }) => {
   };
 
   // --- NOVA LÓGICA DE EXECUÇÃO ---
-
   const handleExecuteProject = () => {
       if (!results) return;
       setShowExecuteModal(true);
@@ -851,7 +811,6 @@ const OtimizadorCorteAco = ({ user }) => {
         }
 
         await updateInventory(updatedInventory);
-        
         setShowExecuteModal(false);
         alert("Projeto executado e estoque atualizado!");
         setActiveTab('inventory');
@@ -866,7 +825,6 @@ const OtimizadorCorteAco = ({ user }) => {
 
   const clearResults = () => { if(window.confirm("Descartar plano?")) { setResults(null); setActiveTab('input'); } };
 
-  // --- Helpers UI ---
   const renderBitolaTabs = (current, setFunction, availableBitolas) => {
     const tabs = ['todas', ...availableBitolas];
     return (
@@ -883,15 +841,13 @@ const OtimizadorCorteAco = ({ user }) => {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 font-sans relative overflow-x-hidden">
       
-      {/* --- SIDEBAR LATERAL (MEUS ARQUIVOS) --- */}
+      {/* SIDEBAR */}
       <div className={`fixed inset-y-0 right-0 w-80 bg-white shadow-2xl z-[60] transform transition-transform duration-300 ease-in-out border-l border-slate-200 flex flex-col ${isSidebarOpen ? 'translate-x-0' : 'translate-x-full'}`}>
           <div className="p-4 bg-indigo-900 text-white flex justify-between items-center shadow-md shrink-0">
               <h2 className="font-bold flex items-center gap-2"><FolderHeart size={20} /> Meus Arquivos</h2>
               <button onClick={() => setIsSidebarOpen(false)} className="hover:bg-indigo-700 p-1 rounded"><X size={20}/></button>
           </div>
           <div className="flex-1 overflow-y-auto p-4 space-y-6 bg-slate-50">
-              
-              {/* SEÇÃO 1: PROJETOS (INPUT) */}
               <div>
                   <h3 className="text-xs font-bold text-slate-500 uppercase mb-2 pl-1 flex items-center gap-2">
                       <FileText size={14}/> Projetos (Demanda)
@@ -901,25 +857,15 @@ const OtimizadorCorteAco = ({ user }) => {
                   ) : (
                       <div className="space-y-2">
                           {projects.map(proj => (
-                              <div 
-                                key={proj.id} 
-                                onClick={() => setEditingProject(proj)}
-                                className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:shadow-md hover:border-indigo-300 cursor-pointer transition-all group relative"
-                              >
+                              <div key={proj.id} onClick={() => setEditingProject(proj)} className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:shadow-md hover:border-indigo-300 cursor-pointer transition-all group relative">
                                   <div className="font-bold text-slate-800 text-sm mb-1 pr-6 truncate">{proj.name}</div>
-                                  <div className="text-xs text-slate-500 flex items-center gap-1">
-                                      <Calendar size={12}/> {proj.createdAt?.toDate().toLocaleDateString()} - {proj.items.length} peças
-                                  </div>
-                                  <div className="absolute top-3 right-3 text-indigo-300 group-hover:text-indigo-600 transition-colors">
-                                    <Edit3 size={14} />
-                                  </div>
+                                  <div className="text-xs text-slate-500 flex items-center gap-1"><Calendar size={12}/> {proj.createdAt?.toDate().toLocaleDateString()} - {proj.items.length} peças</div>
+                                  <div className="absolute top-3 right-3 text-indigo-300 group-hover:text-indigo-600 transition-colors"><Edit3 size={14} /></div>
                               </div>
                           ))}
                       </div>
                   )}
               </div>
-
-              {/* SEÇÃO 2: PLANOS DE CORTE (OUTPUT) */}
               <div>
                   <h3 className="text-xs font-bold text-slate-500 uppercase mb-2 pl-1 flex items-center gap-2 pt-4 border-t border-slate-200">
                       <Download size={14}/> Planos Calculados
@@ -929,36 +875,20 @@ const OtimizadorCorteAco = ({ user }) => {
                   ) : (
                       <div className="space-y-2">
                           {savedPlans.map(plan => (
-                              <div 
-                                key={plan.id} 
-                                onClick={() => handleLoadCutPlan(plan)}
-                                className="bg-green-50 p-3 rounded-lg border border-green-200 shadow-sm hover:shadow-md hover:border-green-400 cursor-pointer transition-all group relative"
-                              >
+                              <div key={plan.id} onClick={() => handleLoadCutPlan(plan)} className="bg-green-50 p-3 rounded-lg border border-green-200 shadow-sm hover:shadow-md hover:border-green-400 cursor-pointer transition-all group relative">
                                   <div className="font-bold text-green-900 text-sm mb-1 pr-6 truncate">{plan.name}</div>
-                                  <div className="text-xs text-green-700/70 flex items-center gap-1">
-                                      <CheckSquare size={12}/> {plan.createdAt?.toDate().toLocaleDateString()}
-                                  </div>
-                                  {/* Botão de Excluir Plano */}
-                                  <button 
-                                      onClick={(e) => handleDeleteCutPlan(plan.id, e)}
-                                      className="absolute top-3 right-3 text-red-300 hover:text-red-600 hover:bg-red-50 p-1 rounded transition-colors"
-                                      title="Excluir Plano"
-                                  >
-                                      <Trash2 size={14} />
-                                  </button>
+                                  <div className="text-xs text-green-700/70 flex items-center gap-1"><CheckSquare size={12}/> {plan.createdAt?.toDate().toLocaleDateString()}</div>
+                                  <button onClick={(e) => handleDeleteCutPlan(plan.id, e)} className="absolute top-3 right-3 text-red-300 hover:text-red-600 hover:bg-red-50 p-1 rounded transition-colors"><Trash2 size={14} /></button>
                               </div>
                           ))}
                       </div>
                   )}
               </div>
-
           </div>
       </div>
-
-      {/* OVERLAY DA SIDEBAR */}
       {isSidebarOpen && <div className="fixed inset-0 bg-black/20 z-[50] backdrop-blur-sm" onClick={() => setIsSidebarOpen(false)}></div>}
 
-      {/* --- MODAL DE DADOS (EXPORT/IMPORT) --- */}
+      {/* MODAL DADOS */}
       {showDataModal && (
           <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm px-4">
               <div className="bg-white rounded-lg shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -966,13 +896,10 @@ const OtimizadorCorteAco = ({ user }) => {
                       <h3 className="font-bold flex items-center gap-2"><Database size={18}/> Gerenciar Dados</h3>
                       <button onClick={() => setShowDataModal(false)} className="hover:bg-slate-700 p-1 rounded"><X size={20}/></button>
                   </div>
-                  
                   <div className="p-6 space-y-8">
-                      {/* Seção de Exportação */}
                       <div>
                           <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2 text-sm uppercase"><Share2 size={16}/> Exportar Dados</h4>
-                          <p className="text-xs text-slate-500 mb-4">Selecione o que deseja salvar em um arquivo JSON para backup ou transferência.</p>
-                          
+                          <p className="text-xs text-slate-500 mb-4">Selecione o que deseja salvar em um arquivo JSON.</p>
                           <div className="space-y-2 mb-4">
                             <label className="flex items-center gap-2 cursor-pointer p-2 border rounded hover:bg-slate-50">
                                 <input type="checkbox" checked={exportSelection.projects} onChange={e => setExportSelection({...exportSelection, projects: e.target.checked})} className="rounded text-indigo-600 focus:ring-indigo-500" />
@@ -987,44 +914,24 @@ const OtimizadorCorteAco = ({ user }) => {
                                 <span className="text-sm font-medium">Planos de Corte Salvos ({savedPlans.length})</span>
                             </label>
                           </div>
-                          
-                          <button onClick={handleExportData} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2 rounded flex items-center justify-center gap-2 transition-colors">
-                              <Download size={16}/> Baixar Arquivo JSON
-                          </button>
+                          <button onClick={handleExportData} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-2 rounded flex items-center justify-center gap-2 transition-colors"><Download size={16}/> Baixar Arquivo JSON</button>
                       </div>
-
                       <div className="border-t border-slate-200"></div>
-
-                      {/* Seção de Importação */}
                       <div>
                           <h4 className="font-bold text-slate-800 mb-3 flex items-center gap-2 text-sm uppercase"><Upload size={16}/> Importar Dados</h4>
-                          <p className="text-xs text-slate-500 mb-4">Carregue um arquivo JSON gerado anteriormente. Os dados serão adicionados à sua conta atual.</p>
-                          
+                          <p className="text-xs text-slate-500 mb-4">Carregue um arquivo JSON gerado anteriormente.</p>
                           <div className="flex gap-2">
-                              <input 
-                                ref={importFileInputRef}
-                                type="file" 
-                                accept=".json" 
-                                onChange={handleImportData}
-                                className="block w-full text-sm text-slate-500
-                                  file:mr-4 file:py-2 file:px-4
-                                  file:rounded-full file:border-0
-                                  file:text-sm file:font-semibold
-                                  file:bg-indigo-50 file:text-indigo-700
-                                  hover:file:bg-indigo-100 cursor-pointer"
-                              />
+                              <input ref={importFileInputRef} type="file" accept=".json" onChange={handleImportData} className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 cursor-pointer"/>
                           </div>
                           {isProcessing && <p className="text-xs text-indigo-600 mt-2 font-bold animate-pulse">Processando arquivo...</p>}
                       </div>
                   </div>
-                  <div className="bg-slate-50 p-3 text-center text-xs text-slate-400 border-t border-slate-100">
-                      Versão do Sistema: 1.0.0
-                  </div>
+                  <div className="bg-slate-50 p-3 text-center text-xs text-slate-400 border-t border-slate-100">Versão do Sistema: 1.0.0</div>
               </div>
           </div>
       )}
 
-      {/* --- MODAL DE EDIÇÃO DO PROJETO (INPUT) --- */}
+      {/* MODAL EDITAR PROJETO */}
       {editingProject && (
           <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center backdrop-blur-sm p-4">
               <div className="bg-white rounded-lg shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -1036,34 +943,16 @@ const OtimizadorCorteAco = ({ user }) => {
                       <div>
                           <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nome do Projeto</label>
                           <div className="flex gap-2">
-                              <input 
-                                type="text" 
-                                value={editingProject.name} 
-                                onChange={(e) => setEditingProject({...editingProject, name: e.target.value})}
-                                className="flex-1 p-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 outline-none"
-                              />
-                              <button 
-                                onClick={() => handleUpdateProjectName(editingProject.id, editingProject.name)}
-                                className="bg-indigo-100 text-indigo-700 p-2 rounded hover:bg-indigo-200" title="Salvar Nome"
-                              >
-                                  <Save size={18} />
-                              </button>
+                              <input type="text" value={editingProject.name} onChange={(e) => setEditingProject({...editingProject, name: e.target.value})} className="flex-1 p-2 border border-slate-300 rounded focus:ring-2 focus:ring-indigo-500 outline-none"/>
+                              <button onClick={() => handleUpdateProjectName(editingProject.id, editingProject.name)} className="bg-indigo-100 text-indigo-700 p-2 rounded hover:bg-indigo-200" title="Salvar Nome"><Save size={18} /></button>
                           </div>
                       </div>
                       <div className="bg-slate-50 p-3 rounded border border-slate-100 text-sm text-slate-600">
                           <p><strong>Itens:</strong> {editingProject.items.length} peças</p>
                           <p><strong>Data:</strong> {editingProject.createdAt?.toDate().toLocaleDateString()}</p>
                       </div>
-                      
                       <div className="pt-4 flex flex-col gap-2">
-                          <button 
-                            onClick={() => loadProjectAsModule(editingProject)}
-                            className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-transform active:scale-95"
-                          >
-                              <FolderDown size={20} /> Carregar no Workspace
-                          </button>
-                          <p className="text-xs text-center text-slate-400 mb-2">Adiciona este projeto como um módulo na tela principal.</p>
-                          
+                          <button onClick={() => loadProjectAsModule(editingProject)} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg flex items-center justify-center gap-2 transition-transform active:scale-95"><FolderDown size={20} /> Carregar no Workspace</button>
                           <div className="border-t pt-3 mt-2 flex justify-between items-center">
                              <span className="text-xs text-red-400 cursor-pointer hover:underline hover:text-red-600" onClick={() => handleDeleteProject(editingProject.id)}>Excluir Projeto</span>
                           </div>
@@ -1073,7 +962,7 @@ const OtimizadorCorteAco = ({ user }) => {
           </div>
       )}
 
-      {/* --- MODAL DE RESTAURAÇÃO DE BACKUP --- */}
+      {/* MODAL BACKUP */}
       {showBackupModal && (
           <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm px-4">
               <div className="bg-white rounded-lg shadow-xl w-full max-w-lg overflow-hidden animate-in fade-in zoom-in-95 duration-200">
@@ -1090,130 +979,59 @@ const OtimizadorCorteAco = ({ user }) => {
                                   <div key={bkp.id} className="bg-white p-4 rounded border border-slate-200 shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
                                       <div>
                                           <div className="font-bold text-slate-800">{bkp.reason || "Backup Automático"}</div>
-                                          <div className="text-xs text-slate-500 mt-1 flex items-center gap-1">
-                                            <Calendar size={12}/> {bkp.createdAt?.toDate().toLocaleString()}
-                                          </div>
-                                          <div className="text-xs text-slate-400 mt-1">
-                                              {bkp.items?.length || 0} itens no estoque
-                                          </div>
+                                          <div className="text-xs text-slate-500 mt-1 flex items-center gap-1"><Calendar size={12}/> {bkp.createdAt?.toDate().toLocaleString()}</div>
+                                          <div className="text-xs text-slate-400 mt-1">{bkp.items?.length || 0} itens no estoque</div>
                                       </div>
-                                      <button 
-                                        onClick={() => restoreBackup(bkp)}
-                                        className="text-sm bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100 px-3 py-1.5 rounded flex items-center gap-2 font-medium transition-colors"
-                                      >
-                                          <RotateCcw size={14}/> Restaurar
-                                      </button>
+                                      <button onClick={() => restoreBackup(bkp)} className="text-sm bg-orange-50 text-orange-700 border border-orange-200 hover:bg-orange-100 px-3 py-1.5 rounded flex items-center gap-2 font-medium transition-colors"><RotateCcw size={14}/> Restaurar</button>
                                   </div>
                               ))}
                           </div>
                       )}
                   </div>
-                  <div className="p-3 bg-white border-t border-slate-100 text-center text-xs text-slate-400">
-                      Mostrando os últimos {MAX_BACKUPS} backups
-                  </div>
+                  <div className="p-3 bg-white border-t border-slate-100 text-center text-xs text-slate-400">Mostrando os últimos {MAX_BACKUPS} backups</div>
               </div>
           </div>
       )}
 
-      {/* --- RENDERIZAÇÃO DO NOVO MODAL DE ESTRATÉGIA --- */}
+      {/* MODAL ESTRATÉGIA */}
       {showStrategyModal && (
-          <StrategyAnalyzer 
-            projects={projects}
-            inventory={inventory}  
-            onClose={() => setShowStrategyModal(false)}
-            onLoadStrategy={applyStrategy}
-        />
-    )}
+          <StrategyAnalyzer projects={projects} inventory={inventory} onClose={() => setShowStrategyModal(false)} onLoadStrategy={applyStrategy} />
+      )}
 
-    {/* --- NOVO: MODAL DE EXECUÇÃO DE PROJETO --- */}
-    {showExecuteModal && (
+      {/* MODAL EXECUÇÃO */}
+      {showExecuteModal && (
         <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm px-4">
             <div className="bg-white rounded-lg shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
                 <div className="bg-purple-50 p-4 border-b border-purple-100 flex justify-between items-center">
                     <h3 className="font-bold text-purple-900 flex items-center gap-2"><CheckSquare size={18}/> Executar Projeto</h3>
                     <button onClick={() => setShowExecuteModal(false)} className="text-purple-300 hover:text-purple-700"><X size={20}/></button>
                 </div>
-                
                 <div className="p-6 space-y-6">
-                    <div className="bg-purple-50 p-3 rounded text-sm text-purple-800 border border-purple-100 mb-4 flex items-start gap-2">
-                        <Info size={16} className="mt-0.5 shrink-0"/>
-                        <p>Esta ação irá atualizar seu banco de dados. Um backup automático será criado antes das alterações.</p>
-                    </div>
-
+                    <div className="bg-purple-50 p-3 rounded text-sm text-purple-800 border border-purple-100 mb-4 flex items-start gap-2"><Info size={16} className="mt-0.5 shrink-0"/><p>Esta ação irá atualizar seu banco de dados. Um backup automático será criado antes das alterações.</p></div>
                     <div className="space-y-4">
-                        {/* Opção 1: Dar Baixa */}
                         <div className="flex items-start gap-3">
-                             <div className="pt-1">
-                                <input 
-                                    type="checkbox" 
-                                    id="optDeduct"
-                                    checked={executeOptions.deductStock}
-                                    onChange={(e) => setExecuteOptions({...executeOptions, deductStock: e.target.checked})}
-                                    className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                                />
-                             </div>
-                             <div>
-                                 <label htmlFor="optDeduct" className="block text-sm font-bold text-gray-700 cursor-pointer">Dar baixa em pontas usadas</label>
-                                 <p className="text-xs text-gray-500">Remove do estoque os itens que foram utilizados neste corte.</p>
-                             </div>
+                             <div className="pt-1"><input type="checkbox" id="optDeduct" checked={executeOptions.deductStock} onChange={(e) => setExecuteOptions({...executeOptions, deductStock: e.target.checked})} className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer"/></div>
+                             <div><label htmlFor="optDeduct" className="block text-sm font-bold text-gray-700 cursor-pointer">Dar baixa em pontas usadas</label><p className="text-xs text-gray-500">Remove do estoque os itens que foram utilizados neste corte.</p></div>
                         </div>
-
-                        {/* Opção 2: Guardar Sobras */}
                         <div className="flex items-start gap-3">
-                             <div className="pt-1">
-                                <input 
-                                    type="checkbox" 
-                                    id="optSave"
-                                    checked={executeOptions.saveLeftovers}
-                                    onChange={(e) => setExecuteOptions({...executeOptions, saveLeftovers: e.target.checked})}
-                                    className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer"
-                                />
-                             </div>
-                             <div>
-                                 <label htmlFor="optSave" className="block text-sm font-bold text-gray-700 cursor-pointer">Guardar pontas no estoque</label>
-                                 <p className="text-xs text-gray-500">Adiciona as sobras geradas ao seu inventário.</p>
-                             </div>
+                             <div className="pt-1"><input type="checkbox" id="optSave" checked={executeOptions.saveLeftovers} onChange={(e) => setExecuteOptions({...executeOptions, saveLeftovers: e.target.checked})} className="w-5 h-5 rounded border-gray-300 text-purple-600 focus:ring-purple-500 cursor-pointer"/></div>
+                             <div><label htmlFor="optSave" className="block text-sm font-bold text-gray-700 cursor-pointer">Guardar pontas no estoque</label><p className="text-xs text-gray-500">Adiciona as sobras geradas ao seu inventário.</p></div>
                         </div>
-
-                        {/* Opção Condicional: Limite de Descarte */}
                         {executeOptions.saveLeftovers && (
                             <div className="ml-8 bg-slate-50 p-3 rounded border border-slate-200 animate-in fade-in slide-in-from-top-2 duration-200">
                                 <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Descartar pontas de até (cm)</label>
                                 <div className="flex gap-2 items-center">
-                                    <input 
-                                        type="number" 
-                                        placeholder="Ex: 50 (Vazio = Guarda tudo)" 
-                                        value={executeOptions.discardLimit}
-                                        onChange={(e) => setExecuteOptions({...executeOptions, discardLimit: e.target.value})}
-                                        className="flex-1 p-2 text-sm border border-slate-300 rounded focus:ring-2 focus:ring-purple-500 outline-none"
-                                    />
+                                    <input type="number" placeholder="Ex: 50 (Vazio = Guarda tudo)" value={executeOptions.discardLimit} onChange={(e) => setExecuteOptions({...executeOptions, discardLimit: e.target.value})} className="flex-1 p-2 text-sm border border-slate-300 rounded focus:ring-2 focus:ring-purple-500 outline-none"/>
                                     <span className="text-xs text-slate-400 font-medium">cm</span>
                                 </div>
-                                <p className="text-[10px] text-slate-400 mt-1">
-                                    {executeOptions.discardLimit 
-                                        ? `Pontas com ${executeOptions.discardLimit}cm ou menos serão descartadas.` 
-                                        : "Todas as sobras > 0cm serão salvas."}
-                                </p>
+                                <p className="text-[10px] text-slate-400 mt-1">{executeOptions.discardLimit ? `Pontas com ${executeOptions.discardLimit}cm ou menos serão descartadas.` : "Todas as sobras > 0cm serão salvas."}</p>
                             </div>
                         )}
                     </div>
                 </div>
-
                 <div className="bg-slate-50 p-4 border-t border-slate-100 flex justify-end gap-2">
-                    <button 
-                        onClick={() => setShowExecuteModal(false)}
-                        className="px-4 py-2 text-slate-600 hover:bg-slate-200 rounded font-medium transition-colors"
-                    >
-                        Cancelar
-                    </button>
-                    <button 
-                        onClick={confirmExecution}
-                        disabled={isProcessing}
-                        className="px-6 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 font-bold shadow transition-transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-                    >
-                        {isProcessing ? <RefreshCw className="animate-spin" size={16}/> : <Check size={16}/>}
-                        Confirmar
-                    </button>
+                    <button onClick={() => setShowExecuteModal(false)} className="px-4 py-2 text-slate-600 hover:bg-slate-200 rounded font-medium transition-colors">Cancelar</button>
+                    <button onClick={confirmExecution} disabled={isProcessing} className="px-6 py-2 bg-purple-600 text-white rounded hover:bg-purple-700 font-bold shadow transition-transform active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2">{isProcessing ? <RefreshCw className="animate-spin" size={16}/> : <Check size={16}/>} Confirmar</button>
                 </div>
             </div>
         </div>
@@ -1221,39 +1039,11 @@ const OtimizadorCorteAco = ({ user }) => {
 
      <header className="bg-slate-900 text-white p-4 shadow-lg sticky top-0 z-40">
         <div className="max-w-6xl mx-auto flex justify-between items-center">
-          
-          {/* LADO ESQUERDO: LOGO APENAS */}
-          <div className="flex items-center gap-2">
-            <Settings className="w-6 h-6 text-yellow-500" />
-            <h1 className="text-xl font-bold tracking-tight hidden sm:block">Otimizador Corte & Dobra</h1>
-            <h1 className="text-xl font-bold tracking-tight sm:hidden">Otimizador</h1>
-          </div>
-
-          {/* LADO DIREITO: AÇÕES */}
+          <div className="flex items-center gap-2"><Settings className="w-6 h-6 text-yellow-500" /><h1 className="text-xl font-bold tracking-tight hidden sm:block">Otimizador Corte & Dobra</h1><h1 className="text-xl font-bold tracking-tight sm:hidden">Otimizador</h1></div>
           <div className="flex items-center gap-3">
-            
-            {/* BOTÃO DE DADOS */}
-            <button 
-                onClick={() => setShowDataModal(true)}
-                className="flex items-center gap-1 text-sm bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-md transition-colors shadow-sm border border-slate-600"
-                title="Importar/Exportar Dados (Backup)"
-            >
-                <Database size={16} /> <span className="hidden sm:inline">Dados</span>
-            </button>
-
-            {/* BOTÃO MEUS ARQUIVOS */}
-            <button 
-                onClick={() => setIsSidebarOpen(true)}
-                className="flex items-center gap-1 text-sm bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-md transition-colors shadow-sm border border-indigo-600"
-            >
-                <FolderHeart size={16} /> <span className="hidden sm:inline">Meus Arquivos</span>
-            </button>
-
-            {/* INFO DO USUÁRIO E LOGOUT */}
-            <div className="hidden md:flex items-center gap-2 text-sm text-slate-400 border-l border-slate-700 pl-3">
-                <User size={14} />
-                <span className="max-w-[150px] truncate">{user.email}</span>
-            </div>
+            <button onClick={() => setShowDataModal(true)} className="flex items-center gap-1 text-sm bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded-md transition-colors shadow-sm border border-slate-600" title="Importar/Exportar Dados (Backup)"><Database size={16} /> <span className="hidden sm:inline">Dados</span></button>
+            <button onClick={() => setIsSidebarOpen(true)} className="flex items-center gap-1 text-sm bg-indigo-700 hover:bg-indigo-600 text-white px-3 py-1.5 rounded-md transition-colors shadow-sm border border-indigo-600"><FolderHeart size={16} /> <span className="hidden sm:inline">Meus Arquivos</span></button>
+            <div className="hidden md:flex items-center gap-2 text-sm text-slate-400 border-l border-slate-700 pl-3"><User size={14} /><span className="max-w-[150px] truncate">{user.email}</span></div>
             <button onClick={handleLogout} className="text-slate-400 hover:text-red-400 p-1"><LogOut size={18} /></button>
           </div>
         </div>
@@ -1261,169 +1051,65 @@ const OtimizadorCorteAco = ({ user }) => {
 
       <main className="max-w-6xl mx-auto p-4">
         
-        {/* --- NAVEGAÇÃO DE ABAS --- */}
-<div className="flex gap-2 sm:gap-4 mb-6 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar items-center">
-  
-  {/* 1. Demanda */}
-  <button onClick={() => setActiveTab('input')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'input' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
-    <FileText size={18} /> Demanda
-  </button>
+        {/* NAVEGAÇÃO */}
+        <div className="flex gap-2 sm:gap-4 mb-6 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar items-center">
+          <button onClick={() => setActiveTab('input')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'input' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}><FileText size={18} /> Demanda</button>
+          <button onClick={() => setActiveTab('inventory')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'inventory' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}><Clipboard size={18} /> Estoque ({inventory.reduce((acc, i) => acc + i.qty, 0)})</button>
+          <button onClick={() => setActiveTab('results')} disabled={!results} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'results' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : results ? 'text-slate-500 hover:bg-white cursor-pointer' : 'text-slate-400 cursor-not-allowed opacity-60'}`}><Download size={18} /> Resultado</button>
+          <button onClick={() => setActiveTab('evaluator')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'evaluator' ? 'bg-white border-b-2 border-indigo-600 text-indigo-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}><BarChart3 size={18} /> Comparador</button>
+          <button onClick={() => setShowStrategyModal(true)} className="flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap text-amber-600 hover:bg-amber-50 hover:text-amber-700 font-bold animate-pulse-slow ml-auto sm:ml-0" title="Comparar cenários e otimizar estratégia"><Lightbulb size={18} /> Assistente de Estratégia</button>
+        </div>
 
-  {/* 2. Estoque */}
-  <button onClick={() => setActiveTab('inventory')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'inventory' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
-    <Clipboard size={18} /> Estoque ({inventory.reduce((acc, i) => acc + i.qty, 0)})
-  </button>
-
- {/* 3. Resultado */}
-  <button 
-    onClick={() => setActiveTab('results')} 
-    disabled={!results} 
-    className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${
-      activeTab === 'results' 
-        ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' // Ativo
-        : results 
-          ? 'text-slate-500 hover:bg-white cursor-pointer' // Inativo, mas com resultados (Liberado)
-          : 'text-slate-400 cursor-not-allowed opacity-60' // Sem resultados (Bloqueado)
-    }`}
-  >
-    <Download size={18} /> Resultado
-  </button>
-  
-  {/* 4. Comparador */}
-  <button onClick={() => setActiveTab('evaluator')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'evaluator' ? 'bg-white border-b-2 border-indigo-600 text-indigo-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}>
-    <BarChart3 size={18} /> Comparador
-  </button>
-
-  {/* 5. Assistente de Estratégia */}
-  <button 
-    onClick={() => setShowStrategyModal(true)} 
-    className="flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap text-amber-600 hover:bg-amber-50 hover:text-amber-700 font-bold animate-pulse-slow ml-auto sm:ml-0"
-    title="Comparar cenários e otimizar estratégia"
-  >
-    <Lightbulb size={18} /> Assistente de Estratégia
-  </button>
-</div>
-
-        {/* --- TAB: INPUT (DEMANDA) --- */}
+        {/* TAB: INPUT */}
         {activeTab === 'input' && (
           <div className="space-y-6 animate-fade-in">
-            {/* Filtro de Bitolas */}
             <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
-                <div className="flex justify-between items-center mb-2">
-                    <h3 className="text-xs font-bold text-slate-500 uppercase">Filtrar visualização</h3>
-                    <button onClick={toggleAllBitolas} className="text-xs text-blue-600 hover:underline">{enabledBitolas.length === BITOLAS_COMERCIAIS.length ? "Desmarcar todas" : "Marcar todas"}</button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                    {BITOLAS_COMERCIAIS.map(bitola => (
-                        <button key={bitola} onClick={() => toggleBitola(bitola)} className={`px-2 py-1 text-xs sm:text-sm rounded border transition-all flex items-center gap-1 ${enabledBitolas.includes(bitola) ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
-                            {enabledBitolas.includes(bitola) ? <CheckSquare size={12} /> : <Square size={12} />} {bitola.toFixed(1)}
-                        </button>
-                    ))}
-                </div>
+                <div className="flex justify-between items-center mb-2"><h3 className="text-xs font-bold text-slate-500 uppercase">Filtrar visualização</h3><button onClick={toggleAllBitolas} className="text-xs text-blue-600 hover:underline">{enabledBitolas.length === BITOLAS_COMERCIAIS.length ? "Desmarcar todas" : "Marcar todas"}</button></div>
+                <div className="flex flex-wrap gap-2">{BITOLAS_COMERCIAIS.map(bitola => (<button key={bitola} onClick={() => toggleBitola(bitola)} className={`px-2 py-1 text-xs sm:text-sm rounded border transition-all flex items-center gap-1 ${enabledBitolas.includes(bitola) ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>{enabledBitolas.includes(bitola) ? <CheckSquare size={12} /> : <Square size={12} />} {bitola.toFixed(1)}</button>))}</div>
             </div>
-
-            {/* Upload Area & Modulos Carregados */}
             <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
               <h2 className="text-lg font-semibold mb-3 text-slate-700">Arquivos e Módulos</h2>
               <div className="border-2 border-dashed border-blue-200 rounded-lg p-6 sm:p-10 text-center hover:bg-blue-50 transition cursor-pointer relative group">
                   <input ref={fileInputRef} type="file" multiple accept=".pdf,.txt,.csv" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                  <div className="flex flex-col items-center gap-3 text-blue-600">
-                      {isProcessing ? <RefreshCw className="animate-spin w-10 h-10" /> : <Upload className="w-10 h-10 group-hover:scale-110 transition-transform" />}
-                      <span className="font-bold text-sm sm:text-base">{isProcessing ? "Lendo arquivos..." : "Clique ou Arraste PDFs aqui"}</span>
-                  </div>
+                  <div className="flex flex-col items-center gap-3 text-blue-600">{isProcessing ? <RefreshCw className="animate-spin w-10 h-10" /> : <Upload className="w-10 h-10 group-hover:scale-110 transition-transform" />}<span className="font-bold text-sm sm:text-base">{isProcessing ? "Lendo arquivos..." : "Clique ou Arraste PDFs aqui"}</span></div>
               </div>
-              
-              {/* Arquivos e Projetos Carregados */}
               {uploadedFiles.length > 0 && (
                   <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                       {uploadedFiles.map((file, idx) => (
-                          <div 
-                            key={idx} 
-                            // Renderização Condicional: AZUL para Projeto, VERDE para Arquivo
-                            className={`flex items-center gap-2 p-3 rounded border shadow-sm transition-all ${
-                                file.type === 'project' 
-                                ? 'bg-blue-50 border-blue-200 text-blue-800' 
-                                : file.status === 'erro' 
-                                    ? 'bg-red-50 border-red-200 text-red-700' 
-                                    : 'bg-green-50 border-green-200 text-green-700'
-                            }`}
-                          >
+                          <div key={idx} className={`flex items-center gap-2 p-3 rounded border shadow-sm transition-all ${file.type === 'project' ? 'bg-blue-50 border-blue-200 text-blue-800' : file.status === 'erro' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'}`}>
                               {file.type === 'project' ? <FolderHeart size={18} className="text-blue-500"/> : <File size={18} className="text-green-500"/>}
-                              
-                              <div className="flex-1 overflow-hidden">
-                                  <span className="font-bold text-sm block truncate">{file.name}</span>
-                                  <span className="text-xs opacity-70 block">
-                                      {file.type === 'project' ? 'Módulo Carregado' : 'Arquivo PDF Importado'}
-                                  </span>
-                              </div>
-
+                              <div className="flex-1 overflow-hidden"><span className="font-bold text-sm block truncate">{file.name}</span><span className="text-xs opacity-70 block">{file.type === 'project' ? 'Módulo Carregado' : 'Arquivo PDF Importado'}</span></div>
                               <button onClick={() => removeFileOrProject(file)} className="text-slate-400 hover:text-red-600 p-1"><XCircle size={18} /></button>
                           </div>
                       ))}
                   </div>
               )}
             </div>
-
-            {/* Lista de Itens */}
             <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
               <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
-                <h2 className="text-lg font-semibold text-slate-700 flex items-center gap-2">
-                    Lista de Corte <span className="text-sm font-normal text-slate-400">({items.length} itens)</span>
-                </h2>
+                <h2 className="text-lg font-semibold text-slate-700 flex items-center gap-2">Lista de Corte <span className="text-sm font-normal text-slate-400">({items.length} itens)</span></h2>
                 <div className="flex gap-2">
-                    <button onClick={handleSaveProject} className="flex items-center gap-1 bg-indigo-50 text-indigo-600 border border-indigo-200 px-3 py-1.5 rounded-md hover:bg-indigo-100 text-sm font-medium transition-colors">
-                        <Save size={16} /> <span className="hidden sm:inline">Salvar Projeto</span>
-                    </button>
+                    <button onClick={handleSaveProject} className="flex items-center gap-1 bg-indigo-50 text-indigo-600 border border-indigo-200 px-3 py-1.5 rounded-md hover:bg-indigo-100 text-sm font-medium transition-colors"><Save size={16} /> <span className="hidden sm:inline">Salvar Projeto</span></button>
                     <button onClick={clearItems} className="text-red-500 text-sm hover:underline px-2">Limpar</button>
-                    <button onClick={openManualInputModal} className="flex items-center gap-1 bg-green-600 text-white px-3 py-1.5 rounded-md hover:bg-green-700 text-sm shadow-sm transition-transform active:scale-95">
-                        <Plus size={16} /> Manual
-                    </button>
+                    <button onClick={openManualInputModal} className="flex items-center gap-1 bg-green-600 text-white px-3 py-1.5 rounded-md hover:bg-green-700 text-sm shadow-sm transition-transform active:scale-95"><Plus size={16} /> Manual</button>
                 </div>
               </div>
-
               {items.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 bg-slate-50 rounded-md border border-dashed border-slate-300">
-                  <p className="font-medium">Lista vazia.</p>
-                  <p className="text-sm mt-1">Importe um PDF, adicione manualmente ou carregue um projeto salvo.</p>
-                </div>
+                <div className="text-center py-12 text-slate-400 bg-slate-50 rounded-md border border-dashed border-slate-300"><p className="font-medium">Lista vazia.</p><p className="text-sm mt-1">Importe um PDF, adicione manualmente ou carregue um projeto salvo.</p></div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm text-left">
                     <thead className="text-xs text-slate-500 uppercase bg-slate-100">
-                      <tr>
-                          <th className="px-4 py-3">Bitola</th>
-                          <th className="px-4 py-3">Qtd</th>
-                          <th className="px-4 py-3">Comp. (cm)</th>
-                          {/* NOVAS COLUNAS */}
-                          <th className="px-4 py-3">Elem.</th>
-                          <th className="px-4 py-3">Pos.</th>
-                          <th className="px-4 py-3">OS</th>
-                          <th className="px-4 py-3">Origem</th>
-                          <th className="px-4 py-3 text-right">Ação</th>
-                      </tr>
+                      <tr><th className="px-4 py-3">Bitola</th><th className="px-4 py-3">Qtd</th><th className="px-4 py-3">Comp. (cm)</th><th className="px-4 py-3">Elem.</th><th className="px-4 py-3">Pos.</th><th className="px-4 py-3">OS</th><th className="px-4 py-3">Origem</th><th className="px-4 py-3 text-right">Ação</th></tr>
                     </thead>
                     <tbody>
                       {filteredItems.map((item) => (
                         <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50">
-                          <td className="px-4 py-2">
-                            <select value={item.bitola} onChange={(e) => updateItem(item.id, 'bitola', parseFloat(e.target.value))} className="w-20 p-1 border rounded bg-white text-xs sm:text-sm">
-                                {BITOLAS_COMERCIAIS.map(b => <option key={b} value={b}>{b}</option>)}
-                            </select>
-                          </td>
+                          <td className="px-4 py-2"><select value={item.bitola} onChange={(e) => updateItem(item.id, 'bitola', parseFloat(e.target.value))} className="w-20 p-1 border rounded bg-white text-xs sm:text-sm">{BITOLAS_COMERCIAIS.map(b => <option key={b} value={b}>{b}</option>)}</select></td>
                           <td className="px-4 py-2"><input type="number" value={item.qty} onChange={(e) => updateItem(item.id, 'qty', parseInt(e.target.value))} className="w-16 p-1 border rounded font-bold text-blue-800 text-center" /></td>
                           <td className="px-4 py-2"><input type="number" value={item.length} onChange={(e) => updateItem(item.id, 'length', parseFloat(e.target.value))} className="w-20 p-1 border rounded text-center" /></td>
-                          
-                          {/* DADOS EXTRAS DO PDF */}
-                          <td className="px-4 py-2 text-xs text-slate-600">{item.elemento || '-'}</td>
-                          <td className="px-4 py-2 text-xs text-slate-600">{item.posicao || '-'}</td>
-                          <td className="px-4 py-2 text-xs text-slate-600">{item.os || '-'}</td>
-
-                          <td className="px-4 py-2 text-xs text-slate-400 max-w-[100px] truncate" title={item.origin}>
-                              {item.origin && item.origin.includes('[PROJETO]') 
-                                ? <span className="text-blue-500 font-semibold">{item.origin}</span>
-                                : item.origin
-                              }
-                          </td>
+                          <td className="px-4 py-2 text-xs text-slate-600">{item.elemento || '-'}</td><td className="px-4 py-2 text-xs text-slate-600">{item.posicao || '-'}</td><td className="px-4 py-2 text-xs text-slate-600">{item.os || '-'}</td>
+                          <td className="px-4 py-2 text-xs text-slate-400 max-w-[100px] truncate" title={item.origin}>{item.origin && item.origin.includes('[PROJETO]') ? <span className="text-blue-500 font-semibold">{item.origin}</span> : item.origin}</td>
                           <td className="px-4 py-2 text-right"><button onClick={() => removeItem(item.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button></td>
                         </tr>
                       ))}
@@ -1432,154 +1118,151 @@ const OtimizadorCorteAco = ({ user }) => {
                 </div>
               )}
             </div>
-
-            {/* BOTÕES E CONTROLES */}
             <div className="flex flex-col sm:flex-row justify-end items-center gap-4 pb-8">
-                
-                {/* --- CHAVE DE USAR PONTAS --- */}
                 <label className="flex items-center gap-3 cursor-pointer bg-white px-4 py-3 rounded-md border border-slate-200 shadow-sm hover:border-indigo-300 transition-all select-none group">
-                    <div className={`w-5 h-5 flex items-center justify-center rounded border transition-colors ${useLeftovers ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
-                        {useLeftovers && <Check size={14} className="text-white" />}
-                    </div>
-                    <input 
-                        type="checkbox" 
-                        className="hidden" 
-                        checked={useLeftovers} 
-                        onChange={(e) => setUseLeftovers(e.target.checked)} 
-                    />
-                    <span className={`text-sm font-bold ${useLeftovers ? 'text-indigo-700' : 'text-slate-500'}`}>
-                        Usar Pontas de Estoque?
-                    </span>
+                    <div className={`w-5 h-5 flex items-center justify-center rounded border transition-colors ${useLeftovers ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>{useLeftovers && <Check size={14} className="text-white" />}</div>
+                    <input type="checkbox" className="hidden" checked={useLeftovers} onChange={(e) => setUseLeftovers(e.target.checked)} />
+                    <span className={`text-sm font-bold ${useLeftovers ? 'text-indigo-700' : 'text-slate-500'}`}>Usar Pontas de Estoque?</span>
                 </label>
-
-                <button onClick={runOptimization} disabled={filteredItems.length === 0 || isProcessing} className={`w-full sm:w-auto px-8 py-3 rounded-md shadow-md font-bold flex items-center justify-center gap-2 transition-all ${filteredItems.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:scale-105'}`}>
-                    {isProcessing ? <RefreshCw className="animate-spin" size={20} /> : <RefreshCw size={20} />}
-                    {isProcessing ? "CALCULANDO..." : "CALCULAR OTIMIZAÇÃO"}
-                </button>
+                <button onClick={runOptimization} disabled={filteredItems.length === 0 || isProcessing} className={`w-full sm:w-auto px-8 py-3 rounded-md shadow-md font-bold flex items-center justify-center gap-2 transition-all ${filteredItems.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:scale-105'}`}>{isProcessing ? <RefreshCw className="animate-spin" size={20} /> : <RefreshCw size={20} />} {isProcessing ? "CALCULANDO..." : "CALCULAR OTIMIZAÇÃO"}</button>
             </div>
           </div>
         )}
 
-        {/* --- TAB: RESULTS --- */}
-{activeTab === 'results' && results && (
-    <div className="space-y-8 animate-fade-in pb-8">
-        <div className="flex justify-between items-center bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex-wrap gap-4">
-            <div><h2 className="text-xl font-bold text-indigo-900">Plano Gerado</h2></div>
-            <div className="flex gap-2 items-center flex-wrap">
-                <button onClick={generatePDF} className="bg-white text-indigo-700 border border-indigo-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-50">
-                    <Printer size={16} /> PDF
-                </button>
-                <button onClick={handleSaveCutPlan} className="bg-indigo-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-700 transition-colors">
-                    <Save size={16} /> Salvar Plano
-                </button>
-                <button onClick={clearResults} className="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-red-100">
-                    <Eraser size={16} /> Limpar
-                </button>
-                <button 
-                    onClick={handleExecuteProject} 
-                    className="bg-purple-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm font-bold border border-purple-800"
-                    title="Baixar estoque usado e salvar sobras"
-                >
-                    <CheckSquare size={16} /> Executar Projeto
-                </button>
-            </div>
-        </div>
-        
-        {renderBitolaTabs(activeResultsBitola, setActiveResultsBitola, results.map(r => parseFloat(r.bitola)).sort((a,b)=>a-b))}
-        
-        {(activeResultsBitola === 'todas' ? results : results.filter(g => Math.abs(parseFloat(g.bitola) - parseFloat(activeResultsBitola)) < 0.01)).map((group, gIdx) => (
-            <div key={gIdx} className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-visible"> {/* overflow-visible para o tooltip não ser cortado */}
-                <div className="bg-slate-100 px-6 py-3 border-b border-slate-200 flex justify-between">
-                    <h3 className="font-bold text-lg text-slate-800">{group.bitola}mm</h3>
-                    <span className="text-sm text-slate-500">{group.bars.reduce((acc,b)=>acc+b.count,0)} barras</span>
-                </div>
-                <div className="p-6 space-y-6">
-                    {group.bars.map((bar, bIdx) => (
-                        <div key={bIdx} className="flex flex-col gap-1 pb-4 border-b border-slate-100 last:border-0 last:pb-0">
-                            {/* Cabeçalho da Barra */}
-                            <div className="flex justify-between text-sm text-slate-600 mb-1 items-center">
-                                <div className="flex items-center gap-3">
-                                    <span className="bg-slate-800 text-white font-bold px-3 py-1 rounded-full text-xs">{bar.count}x</span>
-                                    <span className="font-semibold uppercase tracking-wider text-xs">
-                                        {bar.type === 'nova' 
-                                            ? <span className="text-blue-600 bg-blue-100 px-2 py-0.5 rounded">Barra Nova (12m)</span> 
-                                            : <span className="text-amber-600 bg-amber-100 px-2 py-0.5 rounded">Ponta ({bar.originalLength}cm)</span>
-                                        }
-                                    </span>
-                                </div>
-                                <span className="font-mono text-xs">Sobra: <span className={bar.remaining > 100 ? "text-green-600 font-bold" : "text-slate-600"}>{bar.remaining.toFixed(1)}cm</span></span>
+        {/* TAB: INVENTORY */}
+        {activeTab === 'inventory' && (
+           <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200 space-y-4 animate-fade-in">
+              <div className="flex justify-between items-center flex-wrap gap-4">
+                  <h2 className="text-lg font-semibold text-slate-700">Estoque de Pontas</h2>
+                  <div className="flex gap-2 flex-wrap">
+                    <button onClick={fetchBackups} className="flex items-center gap-1 bg-amber-100 text-amber-700 border border-amber-200 px-3 py-1.5 rounded-md hover:bg-amber-200 text-sm font-medium transition-colors"><History size={16} /> Histórico</button>
+                    <button onClick={clearInventory} className="text-red-500 text-sm hover:underline px-2">Zerar</button>
+                    <button onClick={openAddStockModal} className="flex items-center gap-1 bg-green-600 text-white px-3 py-1.5 rounded-md hover:bg-green-700 text-sm"><Plus size={16} /> Adicionar</button>
+                  </div>
+              </div>
+              {renderBitolaTabs(activeInventoryBitola, setActiveInventoryBitola, BITOLAS_COMERCIAIS)}
+              <div className="overflow-x-auto max-h-[500px] overflow-y-auto border border-slate-200 rounded-b-lg">
+                <table className="w-full text-sm text-left">
+                    <thead className="text-xs text-slate-500 uppercase bg-yellow-50 sticky top-0">
+                        <tr><th className="px-4 py-3">Bitola</th><th className="px-4 py-3">Qtd</th><th className="px-4 py-3">Comp.</th><th className="px-4 py-3">Origem</th><th className="px-4 py-3 text-right">Ação</th></tr>
+                    </thead>
+                    <tbody>
+                        {(activeInventoryBitola === 'todas' ? inventory : inventory.filter(i => i.bitola && Math.abs(i.bitola - parseFloat(activeInventoryBitola)) < 0.01))
+                            .sort((a,b) => (b.bitola || 0) - (a.bitola || 0)).map(item => (
+                            <tr key={item.id} className="border-b border-slate-100 hover:bg-yellow-50">
+                                <td className="px-4 py-2">{item.bitola?.toFixed(1) || '0.0'} mm</td>
+                                <td className="px-4 py-2"><input type="number" value={item.qty} onChange={(e) => updateInventoryItem(item.id, 'qty', parseInt(e.target.value))} className="w-16 p-1 border rounded bg-transparent font-bold text-slate-700 text-center" /></td>
+                                <td className="px-4 py-2">{item.length} cm</td>
+                                <td className="px-4 py-2 text-xs text-slate-400 uppercase">{item.source || 'Manual'}</td>
+                                <td className="px-4 py-2 text-right"><button onClick={() => removeInventoryItem(item.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button></td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+                {/* --- AVISO VISUAL DE ESTOQUE VAZIO --- */}
+                {inventory.length === 0 && (
+                    <div className="text-center py-12 text-slate-400">
+                        <p className="font-medium">Estoque vazio.</p>
+                        <p className="text-xs mt-2">Clique em "Adicionar" ou use o botão "Histórico" para recuperar dados.</p>
+                    </div>
+                )}
+              </div>
+           </div>
+        )}
+
+        {/* MODAIS (ADICIONAR ITEM MANUAL / ESTOQUE) */}
+        {(showManualInputModal || showAddStockModal) && (
+            <div className="fixed inset-0 bg-black/50 z-[100] flex items-center justify-center backdrop-blur-sm px-4">
+                <div className="bg-white rounded-lg shadow-xl p-6 w-full max-w-sm animate-in fade-in zoom-in-95 duration-200">
+                    <div className="flex justify-between items-center mb-4 border-b pb-2">
+                        <h3 className="text-lg font-bold text-slate-800">{showManualInputModal ? "Adicionar Peça" : "Adicionar ao Estoque"}</h3>
+                        <button onClick={() => {setShowManualInputModal(false); setShowAddStockModal(false);}}><X size={20} className="text-slate-400" /></button>
+                    </div>
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-sm font-medium text-slate-600 mb-1">Bitola</label>
+                            <select value={showManualInputModal ? newManualItemData.bitola : newStockItemData.bitola} onChange={(e) => {
+                                const val = e.target.value;
+                                showManualInputModal ? setNewManualItemData({...newManualItemData, bitola: val}) : setNewStockItemData({...newStockItemData, bitola: val});
+                            }} className="w-full p-2 border rounded">{BITOLAS_COMERCIAIS.map(b => <option key={b} value={b}>{b} mm</option>)}</select>
+                        </div>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-slate-600 mb-1">Comprimento (cm)</label>
+                                <input type="number" value={showManualInputModal ? newManualItemData.length : newStockItemData.length} onChange={(e) => {
+                                    const val = e.target.value;
+                                    showManualInputModal ? setNewManualItemData({...newManualItemData, length: val}) : setNewStockItemData({...newStockItemData, length: val});
+                                }} className="w-full p-2 border rounded" />
                             </div>
-
-                            {/* O TRILHO DA BARRA (AQUI ESTAVA O PROBLEMA DO OVERFLOW) */}
-                            {/* Removi 'overflow-hidden' e adicionei 'rounded-lg' para manter bonitinho mas deixar o tooltip sair */}
-                            <div className="h-14 w-full bg-slate-200 rounded-lg flex border border-slate-300 relative z-0">
-                                {bar.cuts.map((cutItem, cIdx) => {
-                                    const cutLength = typeof cutItem === 'object' ? cutItem.length : cutItem;
-                                    const cutDetails = typeof cutItem === 'object' ? cutItem.details : {};
-                                    
-                                    return (
-                                        <div 
-                                            key={cIdx} 
-                                            style={{ width: `${(cutLength / bar.originalLength) * 100}%` }} 
-                                            className="h-full bg-blue-500 border-r border-white relative group hover:bg-blue-600 transition-colors first:rounded-l-lg" // Arredonda só o primeiro
-                                        >
-                                            {/* Texto DENTRO da barra (preso e cortado se necessário) */}
-                                            <div className="absolute inset-0 flex flex-col items-center justify-center text-white text-xs overflow-hidden pointer-events-none px-1">
-                                                <span className="font-bold drop-shadow-sm">{cutLength}</span>
-                                                {cutDetails?.elemento && (
-                                                    <span className="text-[9px] opacity-90 hidden sm:block truncate w-full text-center">
-                                                        {cutDetails.elemento}
-                                                    </span>
-                                                )}
-                                            </div>
-
-                                            {/* TOOLTIP FLUTUANTE (Livre, leve e solto) */}
-                                            {/* Z-index 50 para garantir que fique acima de tudo */}
-                                            <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 bg-slate-900 text-white text-[10px] p-2 rounded shadow-2xl z-50 pointer-events-none transition-all duration-200 w-max min-w-[140px] flex flex-col items-center border border-slate-700">
-                                                
-                                                {/* Setinha */}
-                                                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 border-r border-b border-slate-700 transform rotate-45"></div>
-                                                
-                                                {/* Conteúdo do Tooltip */}
-                                                <div className="flex items-center gap-2 mb-1 border-b border-slate-700 pb-1 w-full justify-center">
-                                                    <span className="text-yellow-400 font-bold text-sm">{cutLength}cm</span>
-                                                    <span className="font-bold text-xs">{cutDetails?.elemento || 'S/ Elem.'}</span>
-                                                </div>
-                                                
-                                                <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-slate-300 w-full px-1 text-left">
-                                                    <div className="text-right text-slate-500 text-[9px]">Pos:</div>
-                                                    <div className="font-bold text-white">{cutDetails?.posicao || '-'}</div>
-                                                    
-                                                    <div className="text-right text-slate-500 text-[9px]">OS:</div>
-                                                    <div className="font-bold text-white">{cutDetails?.os || '-'}</div>
-                                                </div>
-                                                
-                                                <div className="mt-1 pt-1 border-t border-slate-700 w-full text-center">
-                                                    <span className="uppercase tracking-wider text-[8px] text-blue-300 font-semibold">
-                                                        {cutDetails?.origin ? cutDetails.origin.replace('[PROJETO]', '').trim() : 'SEM LOCALIZADOR'}
-                                                    </span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                                {/* Espaço vazio (Sobra) */}
-                                <div className="flex-1 bg-slate-300 pattern-diagonal-lines last:rounded-r-lg"></div>
+                            <div>
+                                <label className="block text-sm font-medium text-slate-600 mb-1">Quantidade</label>
+                                <input type="number" value={showManualInputModal ? newManualItemData.qty : newStockItemData.qty} onChange={(e) => {
+                                    const val = e.target.value;
+                                    showManualInputModal ? setNewManualItemData({...newManualItemData, qty: val}) : setNewStockItemData({...newStockItemData, qty: val});
+                                }} className="w-full p-2 border rounded" />
                             </div>
                         </div>
-                    ))}
+                    </div>
+                    <div className="mt-6 flex justify-end gap-2">
+                        <button onClick={() => {setShowManualInputModal(false); setShowAddStockModal(false);}} className="px-4 py-2 text-slate-600 hover:bg-slate-100 rounded">Cancelar</button>
+                        <button onClick={showManualInputModal ? confirmAddManualItem : confirmAddStockItem} className="px-4 py-2 bg-indigo-600 text-white rounded hover:bg-indigo-700 font-medium">Salvar</button>
+                    </div>
                 </div>
             </div>
-        ))}
-    </div>
-)}
+        )}
+
+        {/* TAB: RESULTS */}
+        {activeTab === 'results' && results && (
+            <div className="space-y-8 animate-fade-in pb-8">
+                <div className="flex justify-between items-center bg-indigo-50 p-4 rounded-lg border border-indigo-100 flex-wrap gap-4">
+                    <div><h2 className="text-xl font-bold text-indigo-900">Plano Gerado</h2></div>
+                    <div className="flex gap-2 items-center flex-wrap">
+                        <button onClick={generatePDF} className="bg-white text-indigo-700 border border-indigo-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-50"><Printer size={16} /> PDF</button>
+                        <button onClick={handleSaveCutPlan} className="bg-indigo-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-indigo-700 transition-colors"><Save size={16} /> Salvar Plano</button>
+                        <button onClick={clearResults} className="bg-red-50 text-red-600 border border-red-200 px-4 py-2 rounded shadow flex items-center gap-2 text-sm hover:bg-red-100"><Eraser size={16} /> Limpar</button>
+                        <button onClick={handleExecuteProject} className="bg-purple-600 text-white px-4 py-2 rounded shadow flex items-center gap-2 text-sm font-bold border border-purple-800" title="Baixar estoque usado e salvar sobras"><CheckSquare size={16} /> Executar Projeto</button>
+                    </div>
+                </div>
+                {renderBitolaTabs(activeResultsBitola, setActiveResultsBitola, results.map(r => parseFloat(r.bitola)).sort((a,b)=>a-b))}
+                {(activeResultsBitola === 'todas' ? results : results.filter(g => Math.abs(parseFloat(g.bitola) - parseFloat(activeResultsBitola)) < 0.01)).map((group, gIdx) => (
+                    <div key={gIdx} className="bg-white rounded-lg shadow-sm border border-slate-200 overflow-visible"> 
+                        <div className="bg-slate-100 px-6 py-3 border-b border-slate-200 flex justify-between"><h3 className="font-bold text-lg text-slate-800">{group.bitola}mm</h3><span className="text-sm text-slate-500">{group.bars.reduce((acc,b)=>acc+b.count,0)} barras</span></div>
+                        <div className="p-6 space-y-6">
+                            {group.bars.map((bar, bIdx) => (
+                                <div key={bIdx} className="flex flex-col gap-1 pb-4 border-b border-slate-100 last:border-0 last:pb-0">
+                                    <div className="flex justify-between text-sm text-slate-600 mb-1 items-center">
+                                        <div className="flex items-center gap-3"><span className="bg-slate-800 text-white font-bold px-3 py-1 rounded-full text-xs">{bar.count}x</span><span className="font-semibold uppercase tracking-wider text-xs">{bar.type === 'nova' ? <span className="text-blue-600 bg-blue-100 px-2 py-0.5 rounded">Barra Nova (12m)</span> : <span className="text-amber-600 bg-amber-100 px-2 py-0.5 rounded">Ponta ({bar.originalLength}cm)</span>}</span></div>
+                                        <span className="font-mono text-xs">Sobra: <span className={bar.remaining > 100 ? "text-green-600 font-bold" : "text-slate-600"}>{bar.remaining.toFixed(1)}cm</span></span>
+                                    </div>
+                                    <div className="h-14 w-full bg-slate-200 rounded-lg flex border border-slate-300 relative z-0">
+                                        {bar.cuts.map((cutItem, cIdx) => {
+                                            const cutLength = typeof cutItem === 'object' ? cutItem.length : cutItem;
+                                            const cutDetails = typeof cutItem === 'object' ? cutItem.details : {};
+                                            return (
+                                                <div key={cIdx} style={{ width: `${(cutLength / bar.originalLength) * 100}%` }} className="h-full bg-blue-500 border-r border-white relative group hover:bg-blue-600 transition-colors first:rounded-l-lg">
+                                                    <div className="absolute inset-0 flex flex-col items-center justify-center text-white text-xs overflow-hidden pointer-events-none px-1"><span className="font-bold drop-shadow-sm">{cutLength}</span>{cutDetails?.elemento && (<span className="text-[9px] opacity-90 hidden sm:block truncate w-full text-center">{cutDetails.elemento}</span>)}</div>
+                                                    <div className="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 bg-slate-900 text-white text-[10px] p-2 rounded shadow-2xl z-50 pointer-events-none transition-all duration-200 w-max min-w-[140px] flex flex-col items-center border border-slate-700">
+                                                        <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-slate-900 border-r border-b border-slate-700 transform rotate-45"></div>
+                                                        <div className="flex items-center gap-2 mb-1 border-b border-slate-700 pb-1 w-full justify-center"><span className="text-yellow-400 font-bold text-sm">{cutLength}cm</span><span className="font-bold text-xs">{cutDetails?.elemento || 'S/ Elem.'}</span></div>
+                                                        <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-slate-300 w-full px-1 text-left"><div className="text-right text-slate-500 text-[9px]">Pos:</div><div className="font-bold text-white">{cutDetails?.posicao || '-'}</div><div className="text-right text-slate-500 text-[9px]">OS:</div><div className="font-bold text-white">{cutDetails?.os || '-'}</div></div>
+                                                        <div className="mt-1 pt-1 border-t border-slate-700 w-full text-center"><span className="uppercase tracking-wider text-[8px] text-blue-300 font-semibold">{cutDetails?.origin ? cutDetails.origin.replace('[PROJETO]', '').trim() : 'SEM LOCALIZADOR'}</span></div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                        <div className="flex-1 bg-slate-300 pattern-diagonal-lines last:rounded-r-lg"></div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                ))}
+            </div>
+        )}
         
-        {/* --- ABA: COMPARADOR (EVALUATOR) --- */}
+        {/* TAB: COMPARADOR */}
         {activeTab === 'evaluator' && (
-            <PlanEvaluator 
-                savedPlans={savedPlans} 
-                onDeletePlan={handleDeleteCutPlan} 
-            />
+            <PlanEvaluator savedPlans={savedPlans} onDeletePlan={handleDeleteCutPlan} />
         )}
 
       </main>
@@ -1588,11 +1271,9 @@ const OtimizadorCorteAco = ({ user }) => {
   );
 };
 
-// --- WRAPPER DE AUTH ---
 const App = () => {
     const [user, setUser] = useState(null);
     const [loading, setLoading] = useState(true);
-
     useEffect(() => {
         const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
             setUser(currentUser);
@@ -1600,7 +1281,6 @@ const App = () => {
         });
         return () => unsubscribe();
     }, []);
-
     if (loading) return <div className="min-h-screen bg-slate-100 flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600"></div></div>;
     if (!user) return <Login />;
     return <OtimizadorCorteAco user={user} />;
