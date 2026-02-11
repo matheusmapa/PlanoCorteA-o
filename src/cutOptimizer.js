@@ -2,18 +2,20 @@
 import { generateId } from './pdfProcessor';
 
 export const calculateCutPlan = (items, inventory, barraPadrao = 1200, perdaCorte = 0) => {
+    // 1. Preparação dos dados
     const itemsByBitola = {};
     const inventoryByBitola = {};
 
-    // Expande a demanda
     items.forEach(item => {
         if (!item.bitola) return;
         if (!itemsByBitola[item.bitola]) itemsByBitola[item.bitola] = [];
+        
+        // Explode a quantidade em itens individuais
         for (let i = 0; i < item.qty; i++) {
             itemsByBitola[item.bitola].push({ 
                 ...item, 
                 realId: `${item.id}-${i}`,
-                // Garantimos que os metadados estão aqui
+                // Salva os detalhes para uso posterior
                 details: {
                     elemento: item.elemento || '',
                     posicao: item.posicao || '',
@@ -24,17 +26,21 @@ export const calculateCutPlan = (items, inventory, barraPadrao = 1200, perdaCort
         }
     });
 
-    // Expande o estoque
     inventory.forEach(inv => {
         if (!inventoryByBitola[inv.bitola]) inventoryByBitola[inv.bitola] = [];
         const qtdDisponivel = inv.qty || 1; 
         for(let i=0; i < qtdDisponivel; i++) {
-            inventoryByBitola[inv.bitola].push({ ...inv, virtualId: `${inv.id}_copy_${i}`, used: false });
+            inventoryByBitola[inv.bitola].push({ 
+                ...inv, 
+                virtualId: `${inv.id}_copy_${i}`,
+                used: false 
+            });
         }
     });
 
     const finalResult = [];
 
+    // 2. Otimização
     Object.keys(itemsByBitola).forEach(bitola => {
         const demandList = itemsByBitola[bitola].sort((a, b) => b.length - a.length);
         const stockList = inventoryByBitola[bitola] ? inventoryByBitola[bitola].sort((a, b) => a.length - b.length) : [];
@@ -45,30 +51,23 @@ export const calculateCutPlan = (items, inventory, barraPadrao = 1200, perdaCort
             let bestBarIndex = -1;
             let minWaste = Infinity;
 
-            // Lógica de encaixe (Best Fit)
+            // Tenta encaixar em barras iniciadas
             for (let i = 0; i < barsUsed.length; i++) {
                 const bar = barsUsed[i];
                 if (bar.remaining >= piece.length + perdaCorte) {
                     const waste = bar.remaining - (piece.length + perdaCorte);
-                    if (waste < minWaste) {
-                        minWaste = waste;
-                        bestBarIndex = i;
-                    }
+                    if (waste < minWaste) { minWaste = waste; bestBarIndex = i; }
                 }
             }
 
-            // Define o objeto do corte com os detalhes
-            const cutObject = {
-                length: piece.length,
-                details: piece.details // Carrega P101, OS, etc
-            };
-
             if (bestBarIndex !== -1) {
-                barsUsed[bestBarIndex].cuts.push(cutObject);
+                // Adiciona o corte (número) E o detalhe (objeto)
+                barsUsed[bestBarIndex].cuts.push(piece.length);
+                barsUsed[bestBarIndex].cutsDetails.push(piece.details);
                 barsUsed[bestBarIndex].remaining -= (piece.length + perdaCorte);
                 fitted = true;
             } else {
-                // Tenta Estoque
+                // Tenta Estoque ou Nova
                 let bestStockIndex = -1;
                 let minStockWaste = Infinity;
 
@@ -85,48 +84,52 @@ export const calculateCutPlan = (items, inventory, barraPadrao = 1200, perdaCort
                         type: 'estoque',
                         originalLength: stockList[bestStockIndex].length,
                         remaining: stockList[bestStockIndex].length - piece.length - perdaCorte,
-                        cuts: [cutObject], // Array de objetos agora
+                        cuts: [piece.length],
+                        cutsDetails: [piece.details], // ARRAY NOVO
                         id: stockList[bestStockIndex].id
                     });
                     fitted = true;
                 } else {
-                    // Barra Nova
                     barsUsed.push({
                         type: 'nova',
                         originalLength: barraPadrao,
                         remaining: barraPadrao - piece.length - perdaCorte,
-                        cuts: [cutObject], // Array de objetos agora
+                        cuts: [piece.length],
+                        cutsDetails: [piece.details], // ARRAY NOVO
                         id: 'new-' + generateId()
                     });
                 }
             }
         });
 
-        // Agrupamento Visual (Barras Idênticas)
+        // 3. Agrupamento e Ordenação Visual
         const groupedBars = [];
+        
         barsUsed.forEach(bar => {
-            // Ordena os cortes por tamanho para criar a assinatura visual
-            const sortedCuts = [...bar.cuts].sort((a,b) => b.length - a.length);
-            
-            // A assinatura agora usa apenas o tamanho para agrupar visualmente, 
-            // mas guardamos TODOS os detalhes de cada barra individual
-            const signature = `${bar.type}-${bar.originalLength}-${sortedCuts.map(c => c.length).join(',')}`;
-            
+            // Precisamos ordenar os cortes (maior pro menor) MAS manter os detalhes sincronizados
+            // Criamos um array temporário combinado para ordenar
+            const combined = bar.cuts.map((len, idx) => ({ len, det: bar.cutsDetails[idx] }));
+            combined.sort((a, b) => b.len - a.len);
+
+            // Desacopla novamente
+            const sortedCuts = combined.map(c => c.len);
+            const sortedDetails = combined.map(c => c.det);
+
+            const signature = `${bar.type}-${bar.originalLength}-${sortedCuts.join(',')}`;
             const existingGroup = groupedBars.find(g => g.signature === signature);
-            
-            // Aqui tem um pulo do gato: Se agruparmos 10 barras iguais, precisamos guardar os detalhes das 10 barras.
-            // Para simplificar a visualização, vamos agrupar, mas no detalhe expandido teríamos as etiquetas.
+
             if (existingGroup) {
                 existingGroup.count++;
-                // Adiciona os detalhes dos cortes dessa barra nova ao grupo existente
-                existingGroup.allCutsDetails.push(sortedCuts);
+                // Acumula os detalhes de TODAS as barras deste grupo
+                existingGroup.allDetails.push(sortedDetails);
             } else {
                 groupedBars.push({ 
                     ...bar, 
-                    cuts: sortedCuts, // Cortes ordenados (objetos)
+                    cuts: sortedCuts, 
                     count: 1, 
                     signature: signature,
-                    allCutsDetails: [sortedCuts] // Array de Arrays de cortes
+                    // Inicializa array de detalhes do grupo (Array de Arrays)
+                    allDetails: [sortedDetails] 
                 });
             }
         });
