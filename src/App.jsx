@@ -1054,7 +1054,7 @@ const OtimizadorCorteAco = ({ user }) => {
         {/* NAVEGAÇÃO */}
         <div className="flex gap-2 sm:gap-4 mb-6 border-b border-slate-200 pb-2 overflow-x-auto no-scrollbar items-center">
           <button onClick={() => setActiveTab('input')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'input' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}><FileText size={18} /> Demanda</button>
-          <button onClick={() => setActiveTab('inventory')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'inventory' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}><Clipboard size={18} /> Estoque ({inventory.reduce((acc, i) => acc + i.qty, 0)})</button>
+          <button onClick={() => setActiveTab('inventory')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'inventory' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}><Clipboard size={18} /> Pontas ({inventory.reduce((acc, i) => acc + i.qty, 0)})</button>
           <button onClick={() => setActiveTab('results')} disabled={!results} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'results' ? 'bg-white border-b-2 border-blue-600 text-blue-600 font-bold shadow-sm' : results ? 'text-slate-500 hover:bg-white cursor-pointer' : 'text-slate-400 cursor-not-allowed opacity-60'}`}><Download size={18} /> Resultado</button>
           <button onClick={() => setActiveTab('evaluator')} className={`flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap ${activeTab === 'evaluator' ? 'bg-white border-b-2 border-indigo-600 text-indigo-600 font-bold shadow-sm' : 'text-slate-500 hover:bg-white'}`}><BarChart3 size={18} /> Comparador</button>
           <button onClick={() => setShowStrategyModal(true)} className="flex items-center gap-2 px-4 py-2 rounded-t-lg transition-colors whitespace-nowrap text-amber-600 hover:bg-amber-50 hover:text-amber-700 font-bold animate-pulse-slow ml-auto sm:ml-0" title="Comparar cenários e otimizar estratégia"><Lightbulb size={18} /> Assistente de Estratégia</button>
@@ -1063,53 +1063,148 @@ const OtimizadorCorteAco = ({ user }) => {
         {/* TAB: INPUT */}
         {activeTab === 'input' && (
           <div className="space-y-6 animate-fade-in">
+            
+            {/* 1. FILTRO DE BITOLAS */}
             <div className="bg-white p-4 rounded-lg shadow-sm border border-slate-200">
-                <div className="flex justify-between items-center mb-2"><h3 className="text-xs font-bold text-slate-500 uppercase">Filtrar visualização</h3><button onClick={toggleAllBitolas} className="text-xs text-blue-600 hover:underline">{enabledBitolas.length === BITOLAS_COMERCIAIS.length ? "Desmarcar todas" : "Marcar todas"}</button></div>
-                <div className="flex flex-wrap gap-2">{BITOLAS_COMERCIAIS.map(bitola => (<button key={bitola} onClick={() => toggleBitola(bitola)} className={`px-2 py-1 text-xs sm:text-sm rounded border transition-all flex items-center gap-1 ${enabledBitolas.includes(bitola) ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>{enabledBitolas.includes(bitola) ? <CheckSquare size={12} /> : <Square size={12} />} {bitola.toFixed(1)}</button>))}</div>
+                <div className="flex justify-between items-center mb-2">
+                    <h3 className="text-xs font-bold text-slate-500 uppercase">Filtrar visualização</h3>
+                    <button onClick={toggleAllBitolas} className="text-xs text-blue-600 hover:underline">
+                        {enabledBitolas.length === BITOLAS_COMERCIAIS.length ? "Desmarcar todas" : "Marcar todas"}
+                    </button>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                    {BITOLAS_COMERCIAIS.map(bitola => (
+                        <button key={bitola} onClick={() => toggleBitola(bitola)} className={`px-2 py-1 text-xs sm:text-sm rounded border transition-all flex items-center gap-1 ${enabledBitolas.includes(bitola) ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-400 border-slate-200'}`}>
+                            {enabledBitolas.includes(bitola) ? <CheckSquare size={12} /> : <Square size={12} />} {bitola.toFixed(1)}
+                        </button>
+                    ))}
+                </div>
             </div>
+
+            {/* 2. ÁREA DE UPLOAD & ARQUIVOS */}
             <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
               <h2 className="text-lg font-semibold mb-3 text-slate-700">Arquivos e Módulos</h2>
               <div className="border-2 border-dashed border-blue-200 rounded-lg p-6 sm:p-10 text-center hover:bg-blue-50 transition cursor-pointer relative group">
                   <input ref={fileInputRef} type="file" multiple accept=".pdf,.txt,.csv" onChange={handleFileUpload} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
-                  <div className="flex flex-col items-center gap-3 text-blue-600">{isProcessing ? <RefreshCw className="animate-spin w-10 h-10" /> : <Upload className="w-10 h-10 group-hover:scale-110 transition-transform" />}<span className="font-bold text-sm sm:text-base">{isProcessing ? "Lendo arquivos..." : "Clique ou Arraste PDFs aqui"}</span></div>
+                  <div className="flex flex-col items-center gap-3 text-blue-600">
+                      {isProcessing ? <RefreshCw className="animate-spin w-10 h-10" /> : <Upload className="w-10 h-10 group-hover:scale-110 transition-transform" />}
+                      <span className="font-bold text-sm sm:text-base">{isProcessing ? "Lendo arquivos..." : "Clique ou Arraste PDFs aqui"}</span>
+                  </div>
               </div>
+              
+              {/* Lista de Arquivos Carregados */}
               {uploadedFiles.length > 0 && (
                   <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                       {uploadedFiles.map((file, idx) => (
-                          <div key={idx} className={`flex items-center gap-2 p-3 rounded border shadow-sm transition-all ${file.type === 'project' ? 'bg-blue-50 border-blue-200 text-blue-800' : file.status === 'erro' ? 'bg-red-50 border-red-200 text-red-700' : 'bg-green-50 border-green-200 text-green-700'}`}>
+                          <div 
+                            key={idx} 
+                            className={`flex items-center gap-2 p-3 rounded border shadow-sm transition-all ${
+                                file.type === 'project' 
+                                ? 'bg-blue-50 border-blue-200 text-blue-800' 
+                                : file.status === 'erro' 
+                                    ? 'bg-red-50 border-red-200 text-red-700' 
+                                    : 'bg-green-50 border-green-200 text-green-700'
+                            }`}
+                          >
                               {file.type === 'project' ? <FolderHeart size={18} className="text-blue-500"/> : <File size={18} className="text-green-500"/>}
-                              <div className="flex-1 overflow-hidden"><span className="font-bold text-sm block truncate">{file.name}</span><span className="text-xs opacity-70 block">{file.type === 'project' ? 'Módulo Carregado' : 'Arquivo PDF Importado'}</span></div>
+                              <div className="flex-1 overflow-hidden">
+                                  <span className="font-bold text-sm block truncate">{file.name}</span>
+                                  <span className="text-xs opacity-70 block">
+                                      {file.type === 'project' ? 'Módulo Carregado' : 'Arquivo PDF Importado'}
+                                  </span>
+                              </div>
                               <button onClick={() => removeFileOrProject(file)} className="text-slate-400 hover:text-red-600 p-1"><XCircle size={18} /></button>
                           </div>
                       ))}
                   </div>
               )}
             </div>
+
+            {/* 3. LISTA DE CORTE (TABELA + AÇÕES) */}
             <div className="bg-white p-6 rounded-lg shadow-sm border border-slate-200">
+              
+              {/* Cabeçalho da Lista + Botões Secundários */}
               <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
-                <h2 className="text-lg font-semibold text-slate-700 flex items-center gap-2">Lista de Corte <span className="text-sm font-normal text-slate-400">({items.length} itens)</span></h2>
+                <h2 className="text-lg font-semibold text-slate-700 flex items-center gap-2">
+                    Lista de Corte <span className="text-sm font-normal text-slate-400">({items.length} itens)</span>
+                </h2>
                 <div className="flex gap-2">
-                    <button onClick={handleSaveProject} className="flex items-center gap-1 bg-indigo-50 text-indigo-600 border border-indigo-200 px-3 py-1.5 rounded-md hover:bg-indigo-100 text-sm font-medium transition-colors"><Save size={16} /> <span className="hidden sm:inline">Salvar Projeto</span></button>
+                    <button onClick={handleSaveProject} className="flex items-center gap-1 bg-indigo-50 text-indigo-600 border border-indigo-200 px-3 py-1.5 rounded-md hover:bg-indigo-100 text-sm font-medium transition-colors">
+                        <Save size={16} /> <span className="hidden sm:inline">Salvar Projeto</span>
+                    </button>
                     <button onClick={clearItems} className="text-red-500 text-sm hover:underline px-2">Limpar</button>
-                    <button onClick={openManualInputModal} className="flex items-center gap-1 bg-green-600 text-white px-3 py-1.5 rounded-md hover:bg-green-700 text-sm shadow-sm transition-transform active:scale-95"><Plus size={16} /> Manual</button>
+                    <button onClick={openManualInputModal} className="flex items-center gap-1 bg-green-600 text-white px-3 py-1.5 rounded-md hover:bg-green-700 text-sm shadow-sm transition-transform active:scale-95">
+                        <Plus size={16} /> Manual
+                    </button>
                 </div>
               </div>
+
+              {/* --- BARRA DE AÇÃO PRINCIPAL (MOVIDA PARA O TOPO) --- */}
+              <div className="flex flex-col sm:flex-row justify-end items-center gap-4 mb-6 bg-slate-50 p-3 rounded-lg border border-slate-100">
+                <label className="flex items-center gap-3 cursor-pointer select-none group">
+                    <div className={`w-5 h-5 flex items-center justify-center rounded border transition-colors ${useLeftovers ? 'bg-indigo-600 border-indigo-600' : 'bg-white border-slate-300'}`}>
+                        {useLeftovers && <Check size={14} className="text-white" />}
+                    </div>
+                    <input type="checkbox" className="hidden" checked={useLeftovers} onChange={(e) => setUseLeftovers(e.target.checked)} />
+                    <span className={`text-sm font-bold ${useLeftovers ? 'text-indigo-700' : 'text-slate-500'}`}>
+                        Usar Pontas de Estoque?
+                    </span>
+                </label>
+
+                <button 
+                    onClick={runOptimization} 
+                    disabled={filteredItems.length === 0 || isProcessing} 
+                    className={`w-full sm:w-auto px-6 py-2 rounded-md shadow-md font-bold flex items-center justify-center gap-2 transition-all ${filteredItems.length === 0 ? 'bg-slate-300 text-slate-500 cursor-not-allowed' : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:scale-105'}`}
+                >
+                    {isProcessing ? <RefreshCw className="animate-spin" size={20} /> : <RefreshCw size={20} />}
+                    {isProcessing ? "CALCULANDO..." : "CALCULAR OTIMIZAÇÃO"}
+                </button>
+              </div>
+              {/* --------------------------------------------------- */}
+
+              {/* Tabela de Itens */}
               {items.length === 0 ? (
-                <div className="text-center py-12 text-slate-400 bg-slate-50 rounded-md border border-dashed border-slate-300"><p className="font-medium">Lista vazia.</p><p className="text-sm mt-1">Importe um PDF, adicione manualmente ou carregue um projeto salvo.</p></div>
+                <div className="text-center py-12 text-slate-400 bg-slate-50 rounded-md border border-dashed border-slate-300">
+                  <p className="font-medium">Lista vazia.</p>
+                  <p className="text-sm mt-1">Importe um PDF, adicione manualmente ou carregue um projeto salvo.</p>
+                </div>
               ) : (
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm text-left">
                     <thead className="text-xs text-slate-500 uppercase bg-slate-100">
-                      <tr><th className="px-4 py-3">Bitola</th><th className="px-4 py-3">Qtd</th><th className="px-4 py-3">Comp. (cm)</th><th className="px-4 py-3">Elem.</th><th className="px-4 py-3">Pos.</th><th className="px-4 py-3">OS</th><th className="px-4 py-3">Origem</th><th className="px-4 py-3 text-right">Ação</th></tr>
+                      <tr>
+                          <th className="px-4 py-3">Bitola</th>
+                          <th className="px-4 py-3">Qtd</th>
+                          <th className="px-4 py-3">Comp. (cm)</th>
+                          <th className="px-4 py-3">Elem.</th>
+                          <th className="px-4 py-3">Pos.</th>
+                          <th className="px-4 py-3">OS</th>
+                          <th className="px-4 py-3">Origem</th>
+                          <th className="px-4 py-3 text-right">Ação</th>
+                      </tr>
                     </thead>
                     <tbody>
                       {filteredItems.map((item) => (
                         <tr key={item.id} className="border-b border-slate-100 hover:bg-slate-50">
-                          <td className="px-4 py-2"><select value={item.bitola} onChange={(e) => updateItem(item.id, 'bitola', parseFloat(e.target.value))} className="w-20 p-1 border rounded bg-white text-xs sm:text-sm">{BITOLAS_COMERCIAIS.map(b => <option key={b} value={b}>{b}</option>)}</select></td>
+                          <td className="px-4 py-2">
+                            <select value={item.bitola} onChange={(e) => updateItem(item.id, 'bitola', parseFloat(e.target.value))} className="w-20 p-1 border rounded bg-white text-xs sm:text-sm">
+                                {BITOLAS_COMERCIAIS.map(b => <option key={b} value={b}>{b}</option>)}
+                            </select>
+                          </td>
                           <td className="px-4 py-2"><input type="number" value={item.qty} onChange={(e) => updateItem(item.id, 'qty', parseInt(e.target.value))} className="w-16 p-1 border rounded font-bold text-blue-800 text-center" /></td>
                           <td className="px-4 py-2"><input type="number" value={item.length} onChange={(e) => updateItem(item.id, 'length', parseFloat(e.target.value))} className="w-20 p-1 border rounded text-center" /></td>
-                          <td className="px-4 py-2 text-xs text-slate-600">{item.elemento || '-'}</td><td className="px-4 py-2 text-xs text-slate-600">{item.posicao || '-'}</td><td className="px-4 py-2 text-xs text-slate-600">{item.os || '-'}</td>
-                          <td className="px-4 py-2 text-xs text-slate-400 max-w-[100px] truncate" title={item.origin}>{item.origin && item.origin.includes('[PROJETO]') ? <span className="text-blue-500 font-semibold">{item.origin}</span> : item.origin}</td>
+                          
+                          {/* Colunas de Detalhes */}
+                          <td className="px-4 py-2 text-xs text-slate-600">{item.elemento || '-'}</td>
+                          <td className="px-4 py-2 text-xs text-slate-600">{item.posicao || '-'}</td>
+                          <td className="px-4 py-2 text-xs text-slate-600">{item.os || '-'}</td>
+
+                          <td className="px-4 py-2 text-xs text-slate-400 max-w-[100px] truncate" title={item.origin}>
+                              {item.origin && item.origin.includes('[PROJETO]') 
+                                ? <span className="text-blue-500 font-semibold">{item.origin}</span>
+                                : item.origin
+                              }
+                          </td>
                           <td className="px-4 py-2 text-right"><button onClick={() => removeItem(item.id)} className="text-red-400 hover:text-red-600"><Trash2 size={16} /></button></td>
                         </tr>
                       ))}
@@ -1117,6 +1212,12 @@ const OtimizadorCorteAco = ({ user }) => {
                   </table>
                 </div>
               )}
+            </div>
+            
+            {/* A div de botões antiga foi removida daqui */}
+
+          </div>
+        )}
             </div>
             <div className="flex flex-col sm:flex-row justify-end items-center gap-4 pb-8">
                 <label className="flex items-center gap-3 cursor-pointer bg-white px-4 py-3 rounded-md border border-slate-200 shadow-sm hover:border-indigo-300 transition-all select-none group">
